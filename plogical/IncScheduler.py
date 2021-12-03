@@ -764,12 +764,12 @@ Automatic backup failed for %s on %s.
 
                 if website.package.enforceDiskLimits:
                     if config['DiskUsagePercentage'] >= 100:
-                        command = 'chattr -R +i /home/%s' % (website.domain)
-                        ProcessUtilities.executioner(command)
+                        command = 'chattr -R +i /home/%s/public_html/' % (website.domain)
+                        ProcessUtilities.executioner(command)                  
                     else:
-                        command = 'chattr -R -i /home/%s' % (website.domain)
+                        command = 'chattr -R -i /home/%s/public_html/' % (website.domain)
                         ProcessUtilities.executioner(command)
-
+                       
                 ## Calculate bw usage
 
                 from plogical.vhost import vhost

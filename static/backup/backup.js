@@ -1082,7 +1082,7 @@ app.controller('googleDrive', function ($scope, $http) {
     $scope.driveHidden = true;
 
     $scope.setupAccount = function(){
-        window.open("https://cloud.cyberpanel.net/gDrive?name=" + $scope.accountName + '&server=' + window.location.href + 'Setup');
+        window.open("https://platform.cyberpersons.com/gDrive?name=" + $scope.accountName + '&server=' + window.location.href + 'Setup');
     };
 
     $scope.currentPage = 1;
@@ -1729,6 +1729,8 @@ app.controller('scheduleBackup', function ($scope, $http, $window) {
                 $scope.allSites = response.data.allSites;
                 $scope.lastRun = response.data.lastRun;
                 $scope.currentStatus = response.data.currentStatus;
+                $scope.backupFrequency = response.data.currently;
+                $scope.backupRetention = response.data.retention;
 
             } else {
                 new PNotify({

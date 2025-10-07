@@ -5,7 +5,6 @@ import sys
 import django
 
 from plogical.acl import ACLManager
-
 sys.path.append('/usr/local/CyberCP')
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "CyberCP.settings")
 try:
@@ -26,7 +25,7 @@ from managePHP.phpManager import PHPManager
 from plogical.vhostConfs import vhostConfs
 from ApachController.ApacheVhosts import ApacheVhost
 try:
-    from websiteFunctions.models import Websites, ChildDomains, aliasDomains
+    from websiteFunctions.models import Websites, ChildDomains, aliasDomains, DockerSites
     from databases.models import Databases
 except:
     pass
@@ -193,6 +192,10 @@ class vhost:
     @staticmethod
     def createDirectoryForVirtualHost(virtualHostName,administratorEmail,virtualHostUser, phpVersion, openBasedir):
 
+        if not os.path.exists('/usr/local/lsws/Example/html/.well-known/acme-challenge'):
+            command = 'mkdir -p /usr/local/lsws/Example/html/.well-known/acme-challenge'
+            ProcessUtilities.normalExecutioner(command)
+
         path = "/home/" + virtualHostName
         pathHTML = "/home/" + virtualHostName + "/public_html"
         pathLogs = "/home/" + virtualHostName + "/logs"
@@ -241,6 +244,7 @@ class vhost:
                     currentConf = currentConf.replace('{open_basedir}', 'php_admin_value open_basedir "/tmp:$VH_ROOT"')
                 else:
                     currentConf = currentConf.replace('{open_basedir}', '')
+
 
 
                 confFile.write(currentConf)
@@ -378,6 +382,7 @@ class vhost:
                 delWebsite = Websites.objects.get(domain=virtualHostName)
                 externalApp = delWebsite.externalApp
 
+
                 ##
 
                 databases = Databases.objects.filter(website=delWebsite)
@@ -398,6 +403,23 @@ class vhost:
                 ## Child check, to make sure no database entires are being deleted from child node
 
                 if ACLManager.FindIfChild() == 0:
+
+                    ### Delete Docker Sites first before website deletion
+
+                    if os.path.exists('/home/docker/%s' % (virtualHostName)):
+                        try:
+                            dockerSite = DockerSites.objects.get(admin__domain=virtualHostName)
+                            passdata = {
+                                "domain": virtualHostName,
+                                "name": dockerSite.SiteName
+                            }
+                            from plogical.DockerSites import Docker_Sites
+                            da = Docker_Sites(None, passdata)
+                            da.DeleteDockerApp()
+                            dockerSite.delete()
+                        except:
+                            # If anything fails in Docker cleanup, at least remove the directory
+                            shutil.rmtree('/home/docker/%s' % (virtualHostName))
 
                     for items in databases:
                         mysqlUtilities.deleteDatabase(items.dbName, items.dbUser)
@@ -611,6 +633,25 @@ class vhost:
 
     @staticmethod
     def changePHP(vhFile, phpVersion):
+
+        from pathlib import Path
+        domain = vhFile.split('/')[6]
+        print(domain)
+        try:
+            website = Websites.objects.get(domain=domain)
+            externalApp = website.externalApp
+        except:
+            child = ChildDomains.objects.get(domain=domain)
+            externalApp = child.master.externalApp
+        #HomePath = website.externalApp
+        virtualHostUser = externalApp
+
+        logging.CyberCPLogFileWriter.writeToFile(f"PHP version before making sure its available or not: {phpVersion} and vhFile: {vhFile}")
+
+        from plogical.phpUtilities import phpUtilities
+
+        phpVersion = phpUtilities.FindIfSaidPHPIsAvaiableOtherwiseMaketheNextOneAvailableToUse(None, phpVersion)
+
         phpDetachUpdatePath = '/home/%s/.lsphp_restart.txt' % (vhFile.split('/')[-2])
         if ProcessUtilities.decideServer() == ProcessUtilities.OLS:
             try:
@@ -627,6 +668,8 @@ class vhost:
 
                     path = "  path                    /usr/local/lsws/lsphp" + str(php) + "/bin/lsphp\n"
 
+                    logging.CyberCPLogFileWriter.writeToFile(f"PHP String to be written {path}")
+
                     for items in data:
                         if items.find("/usr/local/lsws/lsphp") > -1 and items.find("path") > -1:
                             writeDataToFile.writelines(path)
@@ -635,17 +678,23 @@ class vhost:
 
                     writeDataToFile.close()
 
-                    writeToFile = open(phpDetachUpdatePath, 'w')
-                    writeToFile.close()
+                    command = 'sudo -u %s touch %s' % (virtualHostUser, phpDetachUpdatePath)
+                    ProcessUtilities.normalExecutioner(command)
 
                     installUtilities.installUtilities.reStartLiteSpeed()
                     try:
-                        os.remove(phpDetachUpdatePath)
+                        command = 'sudo -u %s rm -f %s' % (virtualHostUser, phpDetachUpdatePath)
+                        ProcessUtilities.normalExecutioner(command)
                     except:
                         pass
                 else:
+                    logging.CyberCPLogFileWriter.writeToFile('apache vhost 1')
+
                     php = PHPManager.getPHPString(phpVersion)
-                    command = "systemctl restart php%s-php-fpm" % (php)
+
+                    phpService = ApacheVhost.DecideFPMServiceName(phpVersion)
+
+                    command = f"systemctl restart {phpService}"
                     ProcessUtilities.normalExecutioner(command)
 
                 print("1,None")
@@ -737,7 +786,7 @@ class vhost:
                 print("0,0")
                 return 0,0
 
-            bwmeta = "/home/" + domainName + "/logs/bwmeta"
+            bwmeta = "/home/cyberpanel/%s.bwmeta" % (domainName)
 
             if not os.path.exists(path):
                 print("0,0")
@@ -852,13 +901,26 @@ class vhost:
     def finalizeDomainCreation(virtualHostUser, path):
         try:
 
+            ACLManager.CreateSecureDir()
+
+            RanddomFileName = str(randint(1000, 9999))
+
+            FullPath = '%s/%s' % ('/usr/local/CyberCP/tmp', RanddomFileName)
+
             FNULL = open(os.devnull, 'w')
 
-            shutil.copy("/usr/local/CyberCP/index.html", path + "/index.html")
+            #shutil.copy("/usr/local/CyberCP/index.html", path + "/index.html")
 
-            command = "chown " + virtualHostUser + ":" + virtualHostUser + " " + path + "/index.html"
+            shutil.copy("/usr/local/CyberCP/index.html", FullPath)
+
+            command = "chown " + virtualHostUser + ":" + virtualHostUser + " " + FullPath
             cmd = shlex.split(command)
             subprocess.call(cmd, stdout=FNULL, stderr=subprocess.STDOUT)
+
+            command = 'sudo -u %s cp %s %s/index.html' % (virtualHostUser, FullPath, path)
+            ProcessUtilities.normalExecutioner(command)
+
+            os.remove(FullPath)
 
             vhostPath = vhost.Server_root + "/conf/vhosts"
             command = "chown -R " + "lsadm" + ":" + "lsadm" + " " + vhostPath
@@ -878,18 +940,20 @@ class vhost:
         completePathToConfigFile = confPath + "/vhost.conf"
 
         try:
-            os.makedirs(path)
+
+            command = 'sudo -u %s mkdir %s' % (virtualHostUser, path)
+            ProcessUtilities.normalExecutioner(command)
 
             if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
                 groupName = 'nobody'
             else:
                 groupName = 'nogroup'
 
-            command = "chown " + virtualHostUser + ":%s " % (groupName) + path
-            cmd = shlex.split(command)
-            subprocess.call(cmd, stdout=FNULL, stderr=subprocess.STDOUT)
+            command = 'sudo -g %s -u %s chown %s:%s %s' % (groupName, virtualHostUser, virtualHostUser, groupName, path)
+            ProcessUtilities.normalExecutioner(command)
 
-            command = "chmod 750 %s" % (path)
+
+            command = "sudo -u %s chmod 750 %s" % (virtualHostUser, path)
             cmd = shlex.split(command)
             subprocess.call(cmd, stdout=FNULL, stderr=subprocess.STDOUT)
 

@@ -36,18 +36,6 @@ accesslog $VH_ROOT/logs/$VH_NAME.access_log {
   compressArchive         1
 }
 
-errorpage 403 {
-  url                     403.html
-}
-
-errorpage 404 {
-  url                     404.html
-}
-
-errorpage 500 {
-  url                     500.html
-}
-
 scripthandler  {
   add                     lsapi:{virtualHostUser} php
 }
@@ -77,13 +65,28 @@ phpIniOverride  {
 }
 
 module cache {
- storagePath $VH_ROOT/lscache
+ storagePath /usr/local/lsws/cachedata/$VH_NAME
 }
 
 rewrite  {
  enable                  1
   autoLoadHtaccess        1
 }
+
+context /.well-known/acme-challenge {
+  location                /usr/local/lsws/Example/html/.well-known/acme-challenge
+  allowBrowse             1
+
+  rewrite  {
+     enable                  0
+  }
+  addDefaultCharset       off
+
+  phpIniOverride  {
+
+  }
+}
+
 """
 
     olsChildMainConf = """virtualHost {virtualHostName} {
@@ -127,19 +130,7 @@ phpIniOverride  {
 }
 
 module cache {
- storagePath $VH_ROOT/lscache
-}
-
-errorpage 403 {
-  url                     403.html
-}
-
-errorpage 404 {
-  url                     404.html
-}
-
-errorpage 500 {
-  url                     500.html
+ storagePath /usr/local/lsws/cachedata/$VH_NAME
 }
 
 scripthandler  {
@@ -170,6 +161,21 @@ rewrite  {
   enable                  1
   autoLoadHtaccess        1
 }
+
+context /.well-known/acme-challenge {
+  location                /usr/local/lsws/Example/html/.well-known/acme-challenge
+  allowBrowse             1
+
+  rewrite  {
+    enable                  0
+  }
+  addDefaultCharset       off
+
+  phpIniOverride  {
+
+  }
+}
+
 """
 
     lswsMasterConf = """<VirtualHost *:80>
@@ -179,6 +185,7 @@ rewrite  {
     ServerAdmin {administratorEmail}
     SuexecUserGroup {externalApp} {externalApp}
     DocumentRoot /home/{virtualHostName}/public_html
+    Alias /.well-known/acme-challenge /usr/local/lsws/Example/html/.well-known/acme-challenge
     CustomLog /home/{virtualHostName}/logs/{virtualHostName}.access_log combined
     AddHandler application/x-httpd-php{php} .php .php7 .phtml
     <IfModule LiteSpeed>
@@ -196,6 +203,7 @@ rewrite  {
     ServerAdmin {administratorEmail}
     SuexecUserGroup {externalApp} {externalApp}
     DocumentRoot {path}
+    Alias /.well-known/acme-challenge /usr/local/lsws/Example/html/.well-known/acme-challenge
     CustomLog /home/{masterDomain}/logs/{masterDomain}.access_log combined
     AddHandler application/x-httpd-php{php} .php .php7 .phtml
     <IfModule LiteSpeed>
@@ -205,19 +213,20 @@ rewrite  {
 
 </VirtualHost>"""
 
-    apacheConf = """<VirtualHost *:8081>
+    apacheConf = """<VirtualHost *:8083>
 
         ServerName {virtualHostName}
         ServerAlias www.{virtualHostName}
         ServerAdmin {administratorEmail}
         SuexecUserGroup {externalApp} {externalApp}
         DocumentRoot /home/{virtualHostName}/public_html/
-        <Proxy "unix:/var/run/php-fpm/{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
+        Alias /.well-known/acme-challenge /usr/local/lsws/Example/html/.well-known/acme-challenge
+        <Proxy "unix:{sockPath}{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
         ProxySet disablereuse=off
         </proxy>
         <FilesMatch \.php$>
                     SetHandler proxy:fcgi://php-fpm-{externalApp}
-            </FilesMatch>
+        </FilesMatch>
         #CustomLog /home/{virtualHostName}/logs/{virtualHostName}.access_log combined
         #AddHandler application/x-httpd-php{php} .php .php7 .phtml
         
@@ -237,7 +246,7 @@ rewrite  {
          ServerAdmin {administratorEmail}
          SuexecUserGroup {externalApp} {externalApp}
          DocumentRoot /home/{virtualHostName}/public_html/
-         <Proxy "unix:/var/run/php-fpm/{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
+         <Proxy "unix:{sockPath}{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
             ProxySet disablereuse=off
          </proxy>
          <FilesMatch \.php$>
@@ -255,24 +264,24 @@ rewrite  {
 
          SSLEngine on
          SSLVerifyClient none
-         SSLCertificateFile /etc/httpd/conf.d/ssl/{virtualHostName}.fullchain.pem
-         SSLCertificateKeyFile /etc/httpd/conf.d/ssl/{virtualHostName}.privkey.pem
+         SSLCertificateFile {SSLBase}.fullchain.pem
+         SSLCertificateKeyFile {SSLBase}.privkey.pem
 
 </VirtualHost>
 """
-    apacheConfChild = """<VirtualHost *:8081>
+    apacheConfChild = """<VirtualHost *:8083>
 
         ServerName {virtualHostName}
         ServerAlias www.{virtualHostName}
         ServerAdmin {administratorEmail}
         SuexecUserGroup {externalApp} {externalApp}
         DocumentRoot {path}
-        <Proxy "unix:/var/run/php-fpm/{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
+        <Proxy "unix:{sockPath}{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
         ProxySet disablereuse=off
         </proxy>
         <FilesMatch \.php$>
                     SetHandler proxy:fcgi://php-fpm-{externalApp}
-            </FilesMatch>
+        </FilesMatch>
         #CustomLog /home/{virtualHostName}/logs/{virtualHostName}.access_log combined
         #AddHandler application/x-httpd-php{php} .php .php7 .phtml
         
@@ -292,7 +301,7 @@ rewrite  {
         ServerAdmin {administratorEmail}
         SuexecUserGroup {externalApp} {externalApp}
         DocumentRoot {path}
-        <Proxy "unix:/var/run/php-fpm/{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
+        <Proxy "unix:{sockPath}{virtualHostName}.sock|fcgi://php-fpm-{externalApp}">
             ProxySet disablereuse=off
         </proxy>
         <FilesMatch \.php$>
@@ -309,14 +318,14 @@ rewrite  {
         </Directory>
         SSLEngine on
         SSLVerifyClient none
-        SSLCertificateFile /etc/httpd/conf.d/ssl/{virtualHostName}.fullchain.pem
-        SSLCertificateKeyFile /etc/httpd/conf.d/ssl/{virtualHostName}.privkey.pem
+        SSLCertificateFile {SSLBase}.fullchain.pem
+        SSLCertificateKeyFile {SSLBase}.privkey.pem
 
 </VirtualHost>
 """
     proxyApacheBackend = """extprocessor apachebackend {
   type                    proxy
-  address                 http://127.0.0.1:8081
+  address                 http://127.0.0.1:8083
   maxConns                100
   pcKeepAliveTimeout      60
   initTimeout             60
@@ -361,6 +370,20 @@ accesslog $VH_ROOT/logs/$VH_NAME.access_log {
   compressArchive         1
 }
 
+context /.well-known/acme-challenge {
+  location                /usr/local/lsws/Example/html/.well-known/acme-challenge
+  allowBrowse             1
+
+  rewrite  {
+    enable                  0
+  }
+  addDefaultCharset       off
+
+  phpIniOverride  {
+
+  }
+}
+
 rewrite  {
   enable                  1
   rules                   <<<END_rules
@@ -372,11 +395,24 @@ REWRITERULE ^(.*)$ HTTP://proxyApacheBackendSSL/$1 [P,L]
   END_rules
 }
 
+vhssl  {
+  keyFile                 /etc/letsencrypt/live/{domain}/privkey.pem
+  certFile                /etc/letsencrypt/live/{domain}/fullchain.pem
+  certChain               1
+  sslProtocol             24
+  enableECDHE             1
+  renegProtection         1
+  sslSessionCache         1
+  enableSpdy              15
+  enableStapling           1
+  ocspRespMaxAge           86400
+}
+
 """
     phpFpmPool = """[{www}]
-listen = /var/run/php-fpm/{Sock}.sock
+listen = {sockPath}{Sock}.sock
 listen.owner = nobody
-listen.group = nobody
+listen.group = {group}
 listen.mode = 0660
 user = {externalApp}
 group = {externalApp}
@@ -387,9 +423,9 @@ pm.min_spare_servers = 1
 pm.max_spare_servers = 1
 """
     phpFpmPoolReplace = """[{www}]
-listen = /var/run/php-fpm/{Sock}.sock
+listen = {sockPath}{Sock}.sock
 listen.owner = nobody
-listen.group = nobody
+listen.group = {group}
 listen.mode = 0660
 user = {externalApp}
 group = {externalApp}
@@ -459,3 +495,38 @@ pm.max_spare_servers = {pmMaxSpareServers}
     </IfModule>
     }
 }'"""
+
+    OLSPPConf = """
+### PASSWORD PROTECTION CONF STARTS {{path}}
+
+realm {{RealM_Name}} {
+
+  userDB  {
+    location              {{PassFile}}
+  }
+}
+
+context / {
+  location                {{path}}
+  allowBrowse             1
+  realm                   {{RealM_Name}}
+
+  rewrite  {
+
+  }
+  addDefaultCharset       off
+
+  phpIniOverride  {
+
+  }
+}
+### PASSWORD PROTECTION CONF ENDS {{path}}
+"""
+    LSWSPPProtection = """
+### PASSWORD PROTECTION CONF STARTS {{path}}
+AuthType Basic
+AuthName "{{RealM_Name}}"
+AuthUserFile {{PassFile}}
+Require valid-user
+### PASSWORD PROTECTION CONF ENDS {{path}}
+"""

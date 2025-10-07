@@ -77,12 +77,52 @@ class SystemInformation:
     def getSystemInformation():
         try:
             import psutil
-            SystemInfo = {'ramUsage': int(math.floor(psutil.virtual_memory()[2])), 'cpuUsage': int(math.floor(psutil.cpu_percent())), 'diskUsage': int(math.floor(psutil.disk_usage('/')[3]))}
+            
+            # Get usage percentages
+            ram_percent = int(math.floor(psutil.virtual_memory()[2]))
+            cpu_percent = int(math.floor(psutil.cpu_percent()))
+            disk_percent = int(math.floor(psutil.disk_usage('/')[3]))
+            
+            # Get total system information
+            cpu_cores = psutil.cpu_count()
+            ram_total_mb = int(psutil.virtual_memory().total / (1024 * 1024))
+            disk_total_gb = int(psutil.disk_usage('/').total / (1024 * 1024 * 1024))
+            disk_free_gb = int(psutil.disk_usage('/').free / (1024 * 1024 * 1024))
+            
+            # Get uptime
+            uptime_seconds = int(psutil.boot_time())
+            current_time = int(datetime.datetime.now().timestamp())
+            uptime_diff = current_time - uptime_seconds
+            
+            days = uptime_diff // 86400
+            hours = (uptime_diff % 86400) // 3600
+            minutes = (uptime_diff % 3600) // 60
+            
+            if days > 0:
+                uptime_str = f"{days}D, {hours}H, {minutes}M"
+            else:
+                uptime_str = f"{hours}H, {minutes}M"
+            
+            SystemInfo = {
+                'ramUsage': ram_percent, 
+                'cpuUsage': cpu_percent, 
+                'diskUsage': disk_percent,
+                'cpuCores': cpu_cores,
+                'ramTotalMB': ram_total_mb,
+                'diskTotalGB': disk_total_gb,
+                'diskFreeGB': disk_free_gb,
+                'uptime': uptime_str
+            }
             return SystemInfo
         except:
             SystemInfo = {'ramUsage': 0,
                           'cpuUsage': 0,
-                          'diskUsage': 0}
+                          'diskUsage': 0,
+                          'cpuCores': 0,
+                          'ramTotalMB': 0,
+                          'diskTotalGB': 0,
+                          'diskFreeGB': 0,
+                          'uptime': 'N/A'}
             return SystemInfo
 
     @staticmethod
@@ -98,6 +138,17 @@ class SystemInformation:
                           'diskUsage': 0}
 
         return SystemInfo
+
+    @staticmethod
+    def GetRemainingDiskUsageInMBs():
+        import psutil
+
+        total_disk = psutil.disk_usage('/').total / (1024 * 1024)  # Total disk space in MB
+        used_disk = psutil.disk_usage('/').used / (1024 * 1024)  # Used disk space in MB
+        free_disk = psutil.disk_usage('/').free / (1024 * 1024)  # Free disk space in MB
+        percent_used = psutil.disk_usage('/').percent  # Percentage of disk used
+
+        return used_disk, free_disk, percent_used
 
     @staticmethod
     def populateOLSReport():

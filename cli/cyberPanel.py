@@ -75,14 +75,13 @@ class cyberPanel:
             logger.writeforCLI(str(msg), "Error", stack()[0][3])
             self.printStatus(0, str(msg))
 
-    def createDomain(self, masterDomain, domainName, owner, php, ssl, dkim, openBasedir):
+    def createDomain(self, masterDomain, domainName, owner, php, ssl, dkim, openBasedir, path):
         try:
 
-            path = '/home/' + masterDomain + '/public_html/' + domainName
+            complete_path = '/home/' + masterDomain + '/' + path
             phpSelection = 'PHP ' + php
 
-            result = virtualHostUtilities.createDomain(masterDomain, domainName, phpSelection, path, ssl, dkim,
-                                                       openBasedir, owner, 0)
+            result = virtualHostUtilities.createDomain(masterDomain, domainName, phpSelection, complete_path, ssl, dkim, openBasedir, owner, 0)
 
             if result[0] == 1:
                 self.printStatus(1, 'None')
@@ -121,12 +120,11 @@ class cyberPanel:
 
             websites = Websites.objects.all()
             ipFile = "/etc/cyberpanel/machineIP"
-            f = open(ipFile)
-            ipData = f.read()
+            with open(ipFile, 'r') as f:
+                ipData = f.read()
             ipAddress = ipData.split('\n', 1)[0]
 
-            json_data = "["
-            checker = 0
+            json_data = []
 
             for items in websites:
                 if items.state == 0:
@@ -135,14 +133,8 @@ class cyberPanel:
                     state = "Active"
                 dic = {'domain': items.domain, 'adminEmail': items.adminEmail, 'ipAddress': ipAddress,
                        'admin': items.admin.userName, 'package': items.package.packageName, 'state': state}
+                json_data.append(dic)
 
-                if checker == 0:
-                    json_data = json_data + json.dumps(dic)
-                    checker = 1
-                else:
-                    json_data = json_data + ',' + json.dumps(dic)
-
-            json_data = json_data + ']'
             final_json = json.dumps(json_data)
             print(final_json)
 
@@ -321,7 +313,13 @@ class cyberPanel:
 
     def createDNSRecord(self, virtualHostName, name, recordType, value, priority, ttl):
         try:
-            zone = DNS.getZoneObject(virtualHostName)
+            import tldextract
+
+            no_cache_extract = tldextract.TLDExtract(cache_dir=None)
+            extractDomain = no_cache_extract(virtualHostName)
+            topLevelDomain = extractDomain.domain + '.' + extractDomain.suffix
+
+            zone = DNS.getZoneObject(topLevelDomain)
             DNS.createDNSRecord(zone, name, recordType, value, int(priority), int(ttl))
             self.printStatus(1, 'None')
         except BaseException as msg:
@@ -920,8 +918,13 @@ def main():
             openBasedir = int(args.openBasedir)
         else:
             openBasedir = 0
+            
+        if args.path:
+            path = args.path
+        else:
+            path = "public_html/" + args.childDomain
 
-        cyberpanel.createDomain(args.masterDomain, args.childDomain, args.owner, args.php, ssl, dkim, openBasedir)
+        cyberpanel.createDomain(args.masterDomain, args.childDomain, args.owner, args.php, ssl, dkim, openBasedir, path)
     elif args.function == "deleteChild":
 
         completeCommandExample = 'cyberpanel deleteChild --childDomain cyberpanel.net'
@@ -1581,6 +1584,18 @@ def main():
 
         wm = WebsiteManager()
         wm.installJoomla(1, data)
+
+    elif args.function == "switchTOLSWS":
+
+        completeCommandExample = 'cyberpanel switchTOLSWS --licenseKey <Your lsws key here or you can enter TRIAL)'
+
+        if not args.licenseKey:
+            print("\n\nPlease enter LiteSpeed License key. For example:\n\n" + completeCommandExample + "\n\n")
+            return
+
+        from serverStatus.serverStatusUtil import ServerStatusUtil
+
+        ServerStatusUtil.switchTOLSWSCLI(args.licenseKey)
 
 
 if __name__ == "__main__":

@@ -11,22 +11,30 @@ https://docs.djangoproject.com/en/1.11/ref/settings/
 """
 
 import os
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, continue without it
+    pass
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.11/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'xr%j*p!*$0d%(-(e%@-*hyoz4$f%y77coq0u)6pwmjg4)q&19f'
+SECRET_KEY = os.getenv('SECRET_KEY', 'xr%j*p!*$0d%(-(e%@-*hyoz4$f%y77coq0u)6pwmjg4)q&19f')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+# Allow configuration via environment variable, fallback to wildcard for backward compatibility
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 # Application definition
 
@@ -38,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'baseTemplate',
+    'firewall',
     'loginSystem',
     'packages',
     'websiteFunctions',
@@ -49,7 +58,6 @@ INSTALLED_APPS = [
     'databases',
     'mailServer',
     'serverLogs',
-    'firewall',
     'backup',
     'managePHP',
     'manageSSL',
@@ -66,7 +74,8 @@ INSTALLED_APPS = [
     'containerization',
     'CLManager',
     'IncBackups',
-    'WebTerminal'
+    'aiScanner',
+    #    'WebTerminal'
 ]
 
 MIDDLEWARE = [
@@ -78,11 +87,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'CyberCP.secMiddleware.secMiddleware'
+    'CyberCP.secMiddleware.secMiddleware',
+    'CyberCP.phpmyadminMiddleware.PhpMyAdminAccessMiddleware'
 ]
 
 ROOT_URLCONF = 'CyberCP.urls'
-
 
 TEMPLATES = [
     {
@@ -96,6 +105,9 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'baseTemplate.context_processors.version_context',
+                'baseTemplate.context_processors.cosmetic_context',
+                'baseTemplate.context_processors.notification_preferences_context',
             ],
         },
     },
@@ -103,29 +115,28 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'CyberCP.wsgi.application'
 
-
 # Database
 # https://docs.djangoproject.com/en/1.11/ref/settings/#databases
+
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'cyberpanel',
-        'USER': 'cyberpanel',
-        'PASSWORD': 'Bz9gF7Hr7X4RtD',
-        'HOST': 'localhost',
-        'PORT': ''
+        'NAME': os.getenv('DB_NAME', 'cyberpanel'),
+        'USER': os.getenv('DB_USER', 'cyberpanel'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'SLTUIUxqhulwsh'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '3306'),
     },
     'rootdb': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'mysql',
-        'USER': 'root',
-        'PASSWORD': 'sXm5VlRaAsXkDd',
-        'HOST': 'localhost',
-        'PORT': '',
+        'NAME': os.getenv('ROOT_DB_NAME', 'mysql'),
+        'USER': os.getenv('ROOT_DB_USER', 'root'),
+        'PASSWORD': os.getenv('ROOT_DB_PASSWORD', 'SLTUIUxqhulwsh'),
+        'HOST': os.getenv('ROOT_DB_HOST', 'localhost'),
+        'PORT': os.getenv('ROOT_DB_PORT', '3306'),
     },
 }
-
 DATABASE_ROUTERS = ['backup.backupRouter.backupRouter']
 
 # Password validation
@@ -145,7 +156,6 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/1.11/topics/i18n/
@@ -189,8 +199,12 @@ LANGUAGES = (
     ('de', _('Deutsch')),
     ('id', _('Indonesian')),
     ('bn', _('Bangla')),
+    ('nb', _('Norwegian Bokmål')),
 )
 
 MEDIA_URL = '/usr/local/CyberCP/tmp/'
 MEDIA_ROOT = MEDIA_URL
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2147483648
+
+# Security settings
+X_FRAME_OPTIONS = 'SAMEORIGIN'

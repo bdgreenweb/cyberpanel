@@ -183,7 +183,7 @@
     <!--[if IE]>
     <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'><![endif]-->
     <title> Login - CyberPanel </title>
-    <meta name="description" content="Login to your CypberPanel account">
+    <meta name="description" content="Login to your CyberPanel Account">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <!-- Favicons -->
@@ -255,11 +255,11 @@
         </div>
         <div class="row panel-body">
             <div class="row panel-body">
-                <a class=" login-changelogs" href="https://go.cyberpanel.net/updates" target='_blank'>
+                <a class=" login-changelogs" href="https://cyberpanel.net/KnowledgeBase/home/change-logs/" target='_blank'>
                     <div class="card mb-3" style="max-width: 540px;">
                         <div class="row g-0">
                             <div class="col-md-3">
-                                <img src="/static/images/new-design-list-websites-square.png" alt="..."
+                                <img src="{% static 'baseTemplate/images/new-design-list-websites-square.png' %}" alt="..."
                                      class="object-fit">
                             </div>
                             <div class="col-md-8 ml-5">
@@ -292,7 +292,7 @@
             <form id="loginForm" action="/" class="col-md-8 col-md-offset-2">
                 <h1 class="text-transform-upr text-center panel-body text-bold"
                     style="padding-bottom: 0px; color: #33CCCC;">
-                    <img class="center-block text-center my-20" src="{% static 'images/cyber-panel-logo.svg' %}">
+                    <img class="center-block text-center my-20" src="{% static 'baseTemplate/cyber-panel-logo.svg' %}">
                     CyberPanel
                 </h1>
                 <h4 class="text-muted text-center mb-10">Web Hosting Control Panel</h4>
@@ -312,12 +312,12 @@
                                 <div class="input-group">
                                     <input ng-keypress="initiateLogin($event)" ng-model="password" type="password"
                                            class="form-control" id="password" placeholder="Password" required
-                                           name="password" style="height: 45px;">
+                                           name="password" style="height: 45px;" autocomplete="current-password">
                                     <span class="input-group-addon bg-blue">
                       <i class="glyph-icon icon-unlock-alt"></i>
                     </span>
                                 </div>
-                                <img id="verifyingLogin" class="center-block" src="{% static 'images/loading.gif' %}">
+                                <img id="verifyingLogin" class="center-block" src="{% static 'baseTemplate/images/loading.gif' %}">
                             </div>
 
                             <div ng-hide="verifyCode" class="form-group">
@@ -366,7 +366,7 @@
                 </div>
             </form>
             <div id="loginFailed" class="alert alert-danger">
-                <p>Could Not Login, Error message: {$ errorMessage $}</p>
+                <p>Could Not Login, Error message: <span ng-bind="errorMessage"></span></p>
             </div>
         </div>
     </div>

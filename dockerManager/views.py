@@ -4,6 +4,7 @@
 from django.shortcuts import redirect, HttpResponse
 from loginSystem.models import Administrator
 from loginSystem.views import loadLoginPage
+from plogical.DockerSites import Docker_Sites
 from plogical.httpProc import httpProc
 from .container import ContainerManager
 from .decorators import preDockerRun
@@ -17,7 +18,7 @@ import json
 def dockerPermission(request, userID, context):
 
     currentACL = ACLManager.loadedACL(userID)
-    
+
     if currentACL['admin'] != 1:
         if request.method == "POST":
             return ACLManager.loadErrorJson()
@@ -25,7 +26,7 @@ def dockerPermission(request, userID, context):
             return ACLManager.loadError()
     else:
         return 0
-        
+
 @preDockerRun
 def loadDockerHome(request):
     userID = request.session['userID']
@@ -52,12 +53,12 @@ def installDocker(request):
         json_data = json.dumps(data_ret)
         return HttpResponse(json_data)
 
-    except BaseException as msg:
+    except Exception as msg:
         data_ret = {'status': 0, 'error_message': str(msg)}
         json_data = json.dumps(data_ret)
         return HttpResponse(json_data)
 
-@preDockerRun    
+@preDockerRun
 def installImage(request):
     try:
         userID = request.session['userID']
@@ -75,7 +76,7 @@ def installImage(request):
 
     except KeyError:
         return redirect(loadLoginPage)
-    
+
 @preDockerRun
 def viewContainer(request, name):
     try:
@@ -97,10 +98,14 @@ def viewContainer(request, name):
         return coreResult
 
     except KeyError:
-        return redirect(loadLoginPage)    
+        return redirect(loadLoginPage)
+    except Exception as e:
+        import traceback
+        error_msg = f"Error viewing container {name}: {str(e)}\n{traceback.format_exc()}"
+        return HttpResponse(error_msg, status=500)
 
 @preDockerRun
-def getTags(request): 
+def getTags(request):
     try:
         userID = request.session['userID']
         currentACL = ACLManager.loadedACL(userID)
@@ -117,9 +122,9 @@ def getTags(request):
 
     except KeyError:
         return redirect(loadLoginPage)
-    
+
 @preDockerRun
-def delContainer(request): 
+def delContainer(request):
     try:
 
         userID = request.session['userID']
@@ -137,9 +142,9 @@ def delContainer(request):
 
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
-def recreateContainer(request): 
+
+@preDockerRun
+def recreateContainer(request):
     try:
         userID = request.session['userID']
         currentACL = ACLManager.loadedACL(userID)
@@ -155,9 +160,9 @@ def recreateContainer(request):
         return coreResult
 
     except KeyError:
-        return redirect(loadLoginPage)    
-    
-@preDockerRun    
+        return redirect(loadLoginPage)
+
+@preDockerRun
 def runContainer(request):
     try:
         userID = request.session['userID']
@@ -167,13 +172,13 @@ def runContainer(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         return cm.createContainer(request, userID)
     except KeyError:
-        return redirect(loadLoginPage)    
+        return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def listContainers(request):
     try:
         userID = request.session['userID']
@@ -182,7 +187,7 @@ def listContainers(request):
     except KeyError:
         return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def getContainerLogs(request):
     try:
 
@@ -199,9 +204,9 @@ def getContainerLogs(request):
         return coreResult
 
     except KeyError:
-        return redirect(loadLoginPage)    
+        return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def submitContainerCreation(request):
     try:
 
@@ -221,7 +226,7 @@ def submitContainerCreation(request):
     except KeyError:
         return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def getContainerList(request):
     try:
         userID = request.session['userID']
@@ -231,13 +236,13 @@ def getContainerList(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         return cm.getContainerList(userID, json.loads(request.body))
     except KeyError:
         return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def doContainerAction(request):
     try:
         userID = request.session['userID']
@@ -247,15 +252,15 @@ def doContainerAction(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.doContainerAction(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def getContainerStatus(request):
     try:
         userID = request.session['userID']
@@ -265,15 +270,15 @@ def getContainerStatus(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.getContainerStatus(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
-        return redirect(loadLoginPage)    
+        return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def exportContainer(request):
     try:
         userID = request.session['userID']
@@ -283,15 +288,15 @@ def exportContainer(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.exportContainer(request, userID)
-        
+
         return coreResult
     except KeyError:
-        return redirect(loadLoginPage)    
-        
-@preDockerRun        
+        return redirect(loadLoginPage)
+
+@preDockerRun
 def saveContainerSettings(request):
     try:
         userID = request.session['userID']
@@ -301,15 +306,15 @@ def saveContainerSettings(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.saveContainerSettings(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
-        return redirect(loadLoginPage) 
-    
-@preDockerRun    
+        return redirect(loadLoginPage)
+
+@preDockerRun
 def getContainerTop(request):
     try:
         userID = request.session['userID']
@@ -319,15 +324,15 @@ def getContainerTop(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.getContainerTop(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
 
-@preDockerRun    
+@preDockerRun
 def assignContainer(request):
     try:
         userID = request.session['userID']
@@ -337,15 +342,15 @@ def assignContainer(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.assignContainer(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
+
+@preDockerRun
 def searchImage(request):
     try:
         userID = request.session['userID']
@@ -355,27 +360,27 @@ def searchImage(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.searchImage(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
+
+@preDockerRun
 def images(request):
     try:
 
         userID = request.session['userID']
         cm = ContainerManager()
         coreResult = cm.images(request, userID)
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
+
+@preDockerRun
 def manageImages(request):
     try:
         userID = request.session['userID']
@@ -384,8 +389,8 @@ def manageImages(request):
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
+
+@preDockerRun
 def getImageHistory(request):
     try:
         userID = request.session['userID']
@@ -395,15 +400,15 @@ def getImageHistory(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.getImageHistory(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
         return redirect(loadLoginPage)
-    
-@preDockerRun    
+
+@preDockerRun
 def removeImage(request):
     try:
         userID = request.session['userID']
@@ -413,10 +418,267 @@ def removeImage(request):
             pass
         else:
             return ACLManager.loadErrorJson()
-        
+
         cm = ContainerManager()
         coreResult = cm.removeImage(userID, json.loads(request.body))
-        
+
         return coreResult
     except KeyError:
-        return redirect(loadLoginPage)    
+        return redirect(loadLoginPage)
+
+@preDockerRun
+def pullImage(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.pullImage(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+@preDockerRun
+def getDockersiteList(request):
+    import json
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.getDockersiteList(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+
+@preDockerRun
+def getContainerAppinfo(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.getContainerAppinfo(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+@preDockerRun
+def getContainerApplog(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.getContainerApplog(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+@preDockerRun
+def recreateappcontainer(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.recreateappcontainer(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+@preDockerRun
+def RestartContainerAPP(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.RestartContainerAPP(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+@preDockerRun
+def StopContainerAPP(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.StopContainerAPP(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+@preDockerRun
+def executeContainerCommand(request):
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        cm = ContainerManager()
+        coreResult = cm.executeContainerCommand(userID, json.loads(request.body))
+
+        return coreResult
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+def loadContainersForImport(request):
+    """
+    Load all containers for import selection, excluding the current container
+    """
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        currentContainer = request.GET.get('currentContainer', '')
+        
+        # Get all containers using Docker API
+        import docker
+        dockerClient = docker.from_env()
+        containers = dockerClient.containers.list(all=True)
+        
+        containerList = []
+        for container in containers:
+            # Skip the current container
+            if container.name == currentContainer:
+                continue
+                
+            # Get container info
+            containerInfo = {
+                'name': container.name,
+                'image': container.image.tags[0] if container.image.tags else container.image.id,
+                'status': container.status,
+                'id': container.short_id
+            }
+            
+            # Count environment variables
+            try:
+                envVars = container.attrs.get('Config', {}).get('Env', [])
+                containerInfo['envCount'] = len(envVars)
+            except:
+                containerInfo['envCount'] = 0
+                
+            containerList.append(containerInfo)
+        
+        return HttpResponse(json.dumps({
+            'success': 1,
+            'containers': containerList
+        }), content_type='application/json')
+        
+    except Exception as e:
+        return HttpResponse(json.dumps({
+            'success': 0,
+            'message': str(e)
+        }), content_type='application/json')
+    except KeyError:
+        return redirect(loadLoginPage)
+
+
+def getContainerEnv(request):
+    """
+    Get environment variables from a specific container
+    """
+    try:
+        userID = request.session['userID']
+        currentACL = ACLManager.loadedACL(userID)
+
+        if currentACL['admin'] == 1:
+            pass
+        else:
+            return ACLManager.loadErrorJson()
+
+        containerName = request.GET.get('containerName', '')
+        
+        if not containerName:
+            return HttpResponse(json.dumps({
+                'success': 0,
+                'message': 'Container name is required'
+            }), content_type='application/json')
+        
+        # Get container using Docker API
+        import docker
+        dockerClient = docker.from_env()
+        container = dockerClient.containers.get(containerName)
+        
+        # Extract environment variables
+        envVars = {}
+        envList = container.attrs.get('Config', {}).get('Env', [])
+        
+        for envVar in envList:
+            if '=' in envVar:
+                key, value = envVar.split('=', 1)
+                envVars[key] = value
+        
+        return HttpResponse(json.dumps({
+            'success': 1,
+            'envVars': envVars
+        }), content_type='application/json')
+        
+    except Exception as e:
+        return HttpResponse(json.dumps({
+            'success': 0,
+            'message': str(e)
+        }), content_type='application/json')
+    except KeyError:
+        return redirect(loadLoginPage)

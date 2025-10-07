@@ -1,7 +1,10 @@
 import json
 import os,sys
+import time
 
 from django.http import HttpResponse
+
+
 
 sys.path.append('/usr/local/CyberCP')
 import django
@@ -34,8 +37,11 @@ class mailUtilities:
 
     installLogPath = "/home/cyberpanel/openDKIMInstallLog"
     spamassassinInstallLogPath = "/home/cyberpanel/spamassassinInstallLogPath"
+    RspamdInstallLogPath = "/home/cyberpanel/RspamdInstallLogPath"
+    RspamdUnInstallLogPath = "/home/cyberpanel/RspamdUnInstallLogPath"
     cyberPanelHome = "/home/cyberpanel"
     mailScannerInstallLogPath = "/home/cyberpanel/mailScannerInstallLogPath"
+    RSpamdLogPath = '/var/log/rspamd/rspamd.log'
 
     @staticmethod
     def SendEmail(sender, receivers, message):
@@ -53,16 +59,174 @@ class mailUtilities:
             os.makedirs("/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/domains/")
 
         finalPath = "/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/domains/" + domain + ".ini"
+        finalPathJson = "/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/domains/" + domain + ".json"
 
         if not os.path.exists(finalPath):
             shutil.copy(path, finalPath)
+
+        contentJSON = """
+{
+    "name": "%s",
+    "IMAP": {
+        "host": "localhost",
+        "port": 993,
+        "type": 1,
+        "timeout": 300,
+        "shortLogin": false,
+        "sasl": [
+            "SCRAM-SHA3-512",
+            "SCRAM-SHA-512",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-1",
+            "PLAIN",
+            "LOGIN"
+        ],
+        "ssl": {
+            "verify_peer": false,
+            "verify_peer_name": false,
+            "allow_self_signed": false,
+            "SNI_enabled": true,
+            "disable_compression": true,
+            "security_level": 1
+        },
+        "use_expunge_all_on_delete": false,
+        "fast_simple_search": true,
+        "force_select": false,
+        "message_all_headers": false,
+        "message_list_limit": 10000,
+        "search_filter": "",
+        "disabled_capabilities": []
+    },
+    "SMTP": {
+        "host": "localhost",
+        "port": 587,
+        "type": 2,
+        "timeout": 60,
+        "shortLogin": false,
+        "sasl": [
+            "SCRAM-SHA3-512",
+            "SCRAM-SHA-512",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-1",
+            "PLAIN",
+            "LOGIN"
+        ],
+        "ssl": {
+            "verify_peer": false,
+            "verify_peer_name": false,
+            "allow_self_signed": false,
+            "SNI_enabled": true,
+            "disable_compression": true,
+            "security_level": 1
+        },
+        "useAuth": true,
+        "setSender": false,
+        "usePhpMail": false,
+        "authPlainLine": false
+    },
+    "Sieve": {
+        "host": "localhost",
+        "port": 4190,
+        "type": 0,
+        "timeout": 10,
+        "shortLogin": false,
+        "sasl": [
+            "SCRAM-SHA3-512",
+            "SCRAM-SHA-512",
+            "SCRAM-SHA-256",
+            "SCRAM-SHA-1",
+            "PLAIN",
+            "LOGIN"
+        ],
+        "ssl": {
+            "verify_peer": false,
+            "verify_peer_name": false,
+            "allow_self_signed": false,
+            "SNI_enabled": true,
+            "disable_compression": true,
+            "security_level": 1
+        },
+        "enabled": false
+    },
+    "whiteList": ""
+}
+""" % (domain)
+
+        WriteToFile = open(finalPathJson, 'w')
+        WriteToFile.write(contentJSON)
+        WriteToFile.close()
 
         command = 'chown -R lscpd:lscpd /usr/local/lscp/cyberpanel/rainloop/data/'
         ProcessUtilities.normalExecutioner(command)
 
     @staticmethod
+    def InstallMailBoxFoldersPlugin():
+        ### now download and install actual plugin
+
+        labsPath = '/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/configs/application.ini'
+
+        command = f'mkdir /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect'
+        ProcessUtilities.executioner(command)
+
+        command = f'chmod 700 /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect'
+        ProcessUtilities.executioner(command)
+
+        command = f'chown lscpd:lscpd /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect'
+        ProcessUtilities.executioner(command)
+
+        command = f'wget -O /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect/index.php https://raw.githubusercontent.com/the-djmaze/snappymail/master/plugins/mailbox-detect/index.php'
+        ProcessUtilities.executioner(command)
+
+        command = f'chmod 644 /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect/index.php'
+        ProcessUtilities.executioner(command)
+
+        command = f'chown lscpd:lscpd /usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect/index.php'
+        ProcessUtilities.executioner(command)
+
+        ### Enable plugins and enable mailbox creation plugin
+
+        labsDataLines = open(labsPath, 'r').readlines()
+        PluginsActivator = 0
+        WriteToFile = open(labsPath, 'w')
+
+        for lines in labsDataLines:
+            if lines.find('[plugins]') > -1:
+                PluginsActivator = 1
+                WriteToFile.write(lines)
+            elif PluginsActivator and lines.find('enable = ') > -1:
+                WriteToFile.write(f'enable = On\n')
+            elif PluginsActivator and lines.find('enabled_list = ') > -1:
+                WriteToFile.write(f'enabled_list = "mailbox-detect"\n')
+            elif PluginsActivator == 1 and lines.find('[defaults]') > -1:
+                PluginsActivator = 0
+                WriteToFile.write(lines)
+            else:
+                WriteToFile.write(lines)
+        WriteToFile.close()
+
+        ## enable auto create in the enabled plugin
+        PluginsFilePath = '/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/configs/plugin-mailbox-detect.json'
+
+        WriteToFile = open(PluginsFilePath, 'w')
+        WriteToFile.write("""{
+    "plugin": {
+        "autocreate_system_folders": true
+    }
+}
+""")
+        WriteToFile.close()
+
+        command = f'chown lscpd:lscpd {PluginsFilePath}'
+        ProcessUtilities.executioner(command)
+
+        command = f'chmod 600 {PluginsFilePath}'
+        ProcessUtilities.executioner(command)
+
+    @staticmethod
     def createEmailAccount(domain, userName, password, restore = None):
         try:
+
+
 
             ## Check if already exists
 
@@ -161,6 +325,51 @@ class mailUtilities:
             emailLimits = EmailLimits(email=emailAcct)
             emailLimits.save()
 
+            ### Create maildir structure if it doesn't exist
+            
+            # Create base maildir path
+            maildir_base = f"/home/vmail/{domain}/{userName}"
+            maildir_path = f"{maildir_base}/Maildir"
+            
+            # Create the main maildir structure
+            if not os.path.exists(maildir_path):
+                command = f"mkdir -p '{maildir_path}/cur' '{maildir_path}/new' '{maildir_path}/tmp'"
+                ProcessUtilities.executioner(command, 'vmail')
+                
+                # Set proper permissions
+                command = f"chmod -R 700 '{maildir_base}'"
+                ProcessUtilities.executioner(command, 'vmail')
+                
+                # Ensure ownership is correct
+                command = f"chown -R vmail:vmail '{maildir_base}'"
+                ProcessUtilities.executioner(command, 'root')
+
+            # Create standard IMAP folders
+            standard_folders = [
+                ".Archive",
+                ".Deleted Items", 
+                ".Drafts",
+                ".Sent",
+                ".Junk E-mail"
+            ]
+            
+            for folder in standard_folders:
+                folder_path = f"{maildir_path}/{folder}"
+                if not os.path.exists(folder_path):
+                    command = f"mkdir -p '{folder_path}/cur' '{folder_path}/new' '{folder_path}/tmp'"
+                    ProcessUtilities.executioner(command, 'vmail')
+            
+            # Set permissions for all folders
+            command = f"chmod -R 700 '{maildir_path}'"
+            ProcessUtilities.executioner(command, 'vmail')
+            
+            # Ensure final ownership
+            command = f"chown -R vmail:vmail '{maildir_base}'"
+            ProcessUtilities.executioner(command, 'root')
+
+            #if not os.path.exists('/usr/local/lscp/cyberpanel/rainloop/data/_data_/_default_/plugins/mailbox-detect'):
+            #    mailUtilities.InstallMailBoxFoldersPlugin()
+
             print("1,None")
             return 1,"None"
 
@@ -195,20 +404,15 @@ class mailUtilities:
     @staticmethod
     def changeEmailPassword(email, newPassword, encrypt = None):
         try:
+            changePass = EUsers.objects.get(email=email)
             if encrypt == None:
-                CentOSPath = '/etc/redhat-release'
-                changePass = EUsers.objects.get(email=email)
-                if os.path.exists(CentOSPath):
-                    password = bcrypt.hashpw(newPassword.encode('utf-8'), bcrypt.gensalt())
-                    password = '{CRYPT}%s' % (password.decode())
-                    changePass.password = password
-                else:
-                    changePass.password = newPassword
-                changePass.save()
+                # Always use bcrypt hashing regardless of OS
+                password = bcrypt.hashpw(newPassword.encode('utf-8'), bcrypt.gensalt())
+                password = '{CRYPT}%s' % (password.decode())
+                changePass.password = password
             else:
-                changePass = EUsers.objects.get(email=email)
                 changePass.password = newPassword
-                changePass.save()
+            changePass.save()
             return 0,'None'
         except BaseException as msg:
             return 0, str(msg)
@@ -218,16 +422,13 @@ class mailUtilities:
         try:
             ## Generate DKIM Keys
 
-            command = 'chown cyberpanel:cyberpanel -R /usr/local/CyberCP/lib/python3.6/site-packages/tldextract/.suffix_cache'
-            ProcessUtilities.executioner(command)
-
-            command = 'chown cyberpanel:cyberpanel -R /usr/local/CyberCP/lib/python3.8/site-packages/tldextract/.suffix_cache'
-            ProcessUtilities.executioner(command)
 
             import tldextract
 
+            no_cache_extract = tldextract.TLDExtract(cache_dir=None)
+
             actualDomain = virtualHostName
-            extractDomain = tldextract.extract(virtualHostName)
+            extractDomain = no_cache_extract(virtualHostName)
             virtualHostName = extractDomain.domain + '.' + extractDomain.suffix
 
             if not os.path.exists("/etc/opendkim/keys/" + virtualHostName + "/default.txt"):
@@ -263,27 +464,55 @@ class mailUtilities:
             keyTable = "/etc/opendkim/KeyTable"
             configToWrite = "default._domainkey." + actualDomain + " " + actualDomain + ":default:/etc/opendkim/keys/" + virtualHostName + "/default.private\n"
 
-            writeToFile = open(keyTable, 'a')
-            writeToFile.write(configToWrite)
-            writeToFile.close()
+            if not os.path.exists(keyTable):
+                writeToFile = open(keyTable, 'a')
+                writeToFile.write("##### CyberPanel Generated File - Do not edit if you don't know what you are doing.\n")
+                writeToFile.close()
+
+            data = open(keyTable, 'r').read()
+
+            if data.find("default._domainkey." + actualDomain) == -1:
+
+                writeToFile = open(keyTable, 'a')
+                writeToFile.write(configToWrite)
+                writeToFile.close()
 
             ## Edit signing table
 
             signingTable = "/etc/opendkim/SigningTable"
             configToWrite = "*@" + actualDomain + " default._domainkey." + actualDomain + "\n"
 
-            writeToFile = open(signingTable, 'a')
-            writeToFile.write(configToWrite)
-            writeToFile.close()
+            if not os.path.exists(signingTable):
+                writeToFile = open(signingTable, 'a')
+                writeToFile.write("##### CyberPanel Generated File - Do not edit if you don't know what you are doing.\n")
+                writeToFile.close()
+
+            data = open(signingTable, 'r').read()
+
+            if data.find("default._domainkey." + actualDomain) == -1:
+
+                writeToFile = open(signingTable, 'a')
+                writeToFile.write(configToWrite)
+                writeToFile.close()
 
             ## Trusted hosts
 
             trustedHosts = "/etc/opendkim/TrustedHosts"
             configToWrite = actualDomain + "\n"
 
-            writeToFile = open(trustedHosts, 'a')
-            writeToFile.write(configToWrite)
-            writeToFile.close()
+            if not os.path.exists(trustedHosts):
+
+                writeToFile = open(trustedHosts, 'a')
+                writeToFile.write("##### CyberPanel Generated File - Do not edit if you don't know what you are doing.\n")
+                writeToFile.close()
+
+            data = open(trustedHosts, 'r').read()
+
+            if data.find(actualDomain) == -1:
+
+                writeToFile = open(trustedHosts, 'a')
+                writeToFile.write(configToWrite)
+                writeToFile.close()
 
             ## Restart Postfix and OpenDKIM
 
@@ -495,6 +724,612 @@ milter_default_action = accept
             writeToFile.close()
             logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[installSpamAssassin]")
 
+
+    @staticmethod
+    def SetupEmailLimits():
+        rlFile = '/etc/rspamd/override.d/ratelimit.conf'
+        rlContent = '''
+custom_keywords = "/etc/rspamd/custom_ratelimit.lua";
+'''
+        if not os.path.exists(rlFile):
+
+            WriteToFile = open(rlFile, 'w')
+            WriteToFile.write(rlContent)
+            WriteToFile.close()
+
+            rlLUA = '/etc/rspamd/custom_ratelimit.lua'
+            rlLUAContent = '''
+local custom_keywords = {}
+local d = {}
+
+-- create map
+d['badusers'] = rspamd_config:add_map({
+  ['url']= '/etc/rspamd/badusers.map',
+  ['type'] = 'map',
+  ['description'] = 'Bad users'
+})
+
+custom_keywords.customrl = function(task)
+  local rspamd_logger = require "rspamd_logger"
+  -- get authenticated user
+  local user = task:get_user()
+  -- define a default ratelimit
+  local default_rl = "10 / 1m"
+  if not user then return end -- no user, return nil
+  local user_rl = d['badusers']:get_key(user)
+  if user_rl then
+    local limit, duration, unit = string.match(user_rl, "(%d+)%s-/%s-(%d+)(%a*)")
+    if limit and duration then
+      duration = tonumber(duration)
+      if unit == 'm' then
+        duration = duration * 60 -- convert minutes to seconds
+      elseif unit == 'h' then
+        duration = duration * 3600 -- convert hours to seconds
+      elseif unit == 'd' then
+        duration = duration * 86400 -- convert days to seconds
+      end
+      local custom_rl = limit .. " / " .. duration .. "s"
+      rspamd_logger.infox(rspamd_config, "User %s has custom ratelimit: %s", user, custom_rl)
+      return "rs_customrl_" .. user, custom_rl
+    else
+      rspamd_logger.errx(rspamd_config, "Invalid ratelimit format for user %s, using default: %s", user, default_rl)
+      return "rs_customrl_" .. user, default_rl
+    end
+  else
+    rspamd_logger.infox(rspamd_config, "User %s not found in bad users map, using default ratelimit: %s", user, default_rl)
+    return "rs_customrl_" .. user, default_rl
+  end
+end
+
+return custom_keywords
+'''
+
+            WriteToFile = open(rlLUA, 'w')
+            WriteToFile.write(rlLUAContent)
+            WriteToFile.close()
+
+
+    @staticmethod
+    def installRspamd(install, rspamd):
+        from manageServices.serviceManager import ServiceManager
+        try:
+            if os.path.exists(mailUtilities.RspamdInstallLogPath):
+                os.remove(mailUtilities.RspamdInstallLogPath)
+
+
+            ####Frist install redis
+            ServiceManager.InstallRedis()
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos:
+
+                writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                writeToFile.writelines("Configuring RSPAMD repo..\n")
+                writeToFile.close()
+
+
+                command = 'curl https://rspamd.com/rpm-stable/centos-7/rspamd.repo > /etc/yum.repos.d/rspamd.repo'
+                ProcessUtilities.normalExecutioner(command, True)
+
+                command = 'rpm --import https://rspamd.com/rpm-stable/gpg.key'
+                ProcessUtilities.normalExecutioner(command, True)
+
+                command = 'yum update'
+                ProcessUtilities.normalExecutioner(command, True)
+
+
+                command = 'sudo yum install rspamd clamav-server clamav-data clamav-update clamav-filesystem clamav clamav-scanner-systemd clamav-devel clamav-lib clamav-server-systemd -y'
+
+            elif ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+
+                writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                writeToFile.writelines("Configuring RSPAMD repo..\n")
+                writeToFile.close()
+
+                command = 'curl https://rspamd.com/rpm-stable/centos-8/rspamd.repo > /etc/yum.repos.d/rspamd.repo'
+                ProcessUtilities.normalExecutioner(command, True)
+
+                command = 'rpm --import https://rspamd.com/rpm-stable/gpg.key'
+                ProcessUtilities.normalExecutioner(command, True)
+
+                command = 'yum update'
+                ProcessUtilities.normalExecutioner(command, True)
+
+                command = 'sudo yum install rspamd clamav clamd clamav-update -y'
+            else:
+                command = 'DEBIAN_FRONTEND=noninteractive apt-get install rspamd clamav clamav-daemon -y'
+
+
+            with open(mailUtilities.RspamdInstallLogPath, 'w') as f:
+                res = subprocess.call(command, stdout=f, shell=True)
+
+
+            ###### makefile
+            path = "/etc/rspamd/local.d/antivirus.conf"
+            content ="""# ================= DO NOT MODIFY THIS FILE =================
+# 
+# Manual changes will be lost when this file is regenerated.
+#
+# Please read the developer's guide, which is available
+# at NethServer official site: https://www.nethserver.org
+#
+# 
+
+#Enable or disable the module 
+enabled = true
+
+# multiple scanners could be checked, for each we create a configuration block with an arbitrary name
+clamav {
+  # If set force this action if any virus is found (default unset: no action is forced, 'rewrite_subject' to tag as spam)
+  action = "reject";
+
+  # if `true` only messages with non-image attachments will be checked (default true)
+  scan_mime_parts = false;
+
+  # If `max_size` is set, messages > n bytes in size are not scanned
+  max_size = 20000000;
+
+  # type of scanner: "clamav", "fprot", "sophos" or "savapi"
+  type = "clamav";
+
+  # If set true, log message is emitted for clean messages
+  log_clean = false;
+
+  # Timeout and retransmits increased in case of clamav is reloading its database
+  # It takes a lot of time (25 to 60 seconds), after rspamd answers a temporally failure
+  #timeout = 5;
+  #retransmits = 2;
+
+  # servers to query (if port is unspecified, scanner-specific default is used)
+  # can be specified multiple times to pool servers
+  # can be set to a path to a unix socket
+  servers = "127.0.0.1:3310";
+
+  # if `patterns` is specified virus name will be matched against provided regexes and the related
+  # symbol will be yielded if a match is found. If no match is found, default symbol is yielded.
+  patterns {
+    # symbol_name = "pattern";
+    CLAMAV_VIRUS = "^Eicar-Test-Signature$";
+  }
+
+  # In version 1.7.0+ patterns could be a list for ordered matching
+  #patterns = [{SANE_MAL = "Sanesecurity.Malware.*"}, {CLAM_UNOFFICIAL = "UNOFFICIAL$"}];
+
+  # `whitelist` points to a map of IP addresses. Mail from these addresses is not scanned.
+  whitelist = "/etc/rspamd/antivirus.wl";
+}
+"""
+
+
+            wirtedata = open(path, 'w')
+            wirtedata.writelines(content)
+            wirtedata.close()
+
+
+            ### disable dkim signing in rspamd in ref to https://github.com/usmannasir/cyberpanel/issues/1176
+
+            DKIMPath = '/etc/rspamd/local.d/dkim_signing.conf'
+
+            WriteToFile = open(DKIMPath, 'w')
+            WriteToFile.write('enabled = false;\n')
+            WriteToFile.close()
+
+
+            appendpath = "/etc/postfix/main.cf"
+
+            lines = open(appendpath, 'r').readlines()
+
+            WriteToFile = open(appendpath, 'w')
+
+            for line in lines:
+                if line.find('inet:127.0.0.1:8891') > -1:
+                    cLine = line.rstrip('\n')
+                    content = f'{cLine}, inet:127.0.0.1:11332\n'
+                    WriteToFile.write('### Please do not edit this line, editing this line could break configurations\n')
+                    WriteToFile.write(content)
+                elif line.find('non_smtpd_milters') > -1:
+                    WriteToFile.write('non_smtpd_milters = $smtpd_milters\n')
+                else:
+                    WriteToFile.write(line)
+
+            WriteToFile.close()
+
+
+            wpath = "/etc/rspamd/local.d/redis.conf"
+            wdata = """
+write_servers = "127.0.0.1";
+read_servers = "127.0.0.1";
+"""
+
+            wirtedata2 = open(wpath, 'w')
+            wirtedata2.writelines(wdata)
+            wirtedata2.close()
+
+
+            if res == 1:
+                writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                writeToFile.writelines("Can not be installed.[404]\n")
+                writeToFile.close()
+                logging.CyberCPLogFileWriter.writeToFile("[Could not Install Rspamd.]")
+                return 0
+            else:
+
+                if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                    command = 'setsebool -P antivirus_can_scan_system 1'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'setsebool -P clamd_use_jit 1'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'usermod -a -G clamscan _rspamd'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    clamavcontent = """
+User clamscan
+PidFile /var/run/clamd.scan/clamd.pid
+TCPSocket 3310
+TCPAddr 127.0.0.1
+ConcurrentDatabaseReload no
+Debug false
+FixStaleSocket true
+LocalSocketMode 666
+ScanMail true
+ScanArchive true
+#LogFile /var/log/clamd.scan/clamav.log
+"""
+                    writeToFile = open('/etc/clamd.d/scan.conf', 'w')
+                    writeToFile.write(clamavcontent)
+                    writeToFile.close()
+
+                    command = 'touch /var/log/clamd.scan/clamav.log'
+                    ProcessUtilities.normalExecutioner(command, False, 'clamscan')
+
+                    writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                    writeToFile.writelines("Updating Freshclam database..\n")
+                    writeToFile.close()
+
+                    command = 'freshclam'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'systemctl start clamd@scan'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'systemctl restart rspamd'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+                elif ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+
+                    command = 'usermod -a -G clamav _rspamd'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'chown -R clamav:clamav /var/run/clamav'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    clamavcontent = """
+User clamav
+PidFile /var/run/clamav/clamd.pid
+TCPSocket 3310
+TCPAddr 127.0.0.1
+ConcurrentDatabaseReload no
+Debug false
+FixStaleSocket true
+LocalSocketMode 666
+ScanMail true
+ScanArchive true
+LogFile /var/log/clamav/clamav.log
+"""
+                    writeToFile = open('/etc/clamav/clamd.conf', 'w')
+                    writeToFile.write(clamavcontent)
+                    writeToFile.close()
+
+
+                    writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                    writeToFile.writelines("Updating Freshclam database..\n")
+                    writeToFile.close()
+
+                    command = 'freshclam'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'systemctl restart clamav-daemon'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                    command = 'systemctl restart rspamd'
+                    cmd = shlex.split(command)
+
+                    with open(mailUtilities.RspamdInstallLogPath, 'a') as f:
+                        res = subprocess.call(cmd, stdout=f)
+
+                time.sleep(5)
+
+                writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+                writeToFile.writelines("Rspamd Installed.[200]\n")
+                writeToFile.close()
+
+            return 1
+        except BaseException as msg:
+            writeToFile = open(mailUtilities.RspamdInstallLogPath, 'a')
+            writeToFile.writelines("Can not be installed.[404]\n")
+            writeToFile.close()
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[installRspamd]")
+
+    @staticmethod
+    def uninstallRspamd(install, rspamd):
+        from manageServices.serviceManager import ServiceManager
+        try:
+            logging.CyberCPLogFileWriter.writeToFile( "start................[uninstallRspamd]")
+            if os.path.exists(mailUtilities.RspamdUnInstallLogPath):
+                os.remove(mailUtilities.RspamdUnInstallLogPath)
+
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                command = 'sudo yum remove rspamd clamav clamav-daemon -y'
+            else:
+                command = 'sudo apt purge rspamd clamav clamav-daemon -y'
+
+            cmd = shlex.split(command)
+
+
+
+            with open(mailUtilities.RspamdUnInstallLogPath, 'w') as f:
+                res = subprocess.call(cmd, stdout=f)
+            if res == 1:
+                writeToFile = open(mailUtilities.RspamdUnInstallLogPath, 'a')
+                writeToFile.writelines("Can not be uninstalled.[404]\n")
+                writeToFile.close()
+                logging.CyberCPLogFileWriter.writeToFile("[Could not Install Rspamd.]")
+                return 0
+            else:
+                cmdd = 'systemctl stop rspamd'
+                ProcessUtilities.normalExecutioner(cmdd)
+
+                cmmd = 'systemctl disable rspamd'
+                ProcessUtilities.normalExecutioner(cmmd)
+                writeToFile = open(mailUtilities.RspamdUnInstallLogPath, 'a')
+                writeToFile.writelines("Rspamd unInstalled.[200]\n")
+                writeToFile.close()
+            return 1
+        except BaseException as msg:
+            writeToFile = open(mailUtilities.RspamdUnInstallLogPath, 'a')
+            writeToFile.writelines("Can not be installed.[404]\n")
+            writeToFile.close()
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[uninstallRspamd]")
+
+
+    @staticmethod
+    def changeRspamdConfig(install, changeRspamdConfig):
+        try:
+
+            tempfilepath = "/home/cyberpanel/tempfilerspamdconfigs"
+            file= open(tempfilepath, "r")
+            jsondata1 = file.read()
+            jsondata = json.loads(jsondata1)
+            file.close()
+            status = jsondata['status']
+            scan_mime_parts = jsondata['scan_mime_parts']
+            log_clean = jsondata['log_clean']
+            max_size = jsondata['max_size']
+            server = jsondata['Rspamdserver']
+            CLAMAV_VIRUS = jsondata['CLAMAV_VIRUS']
+            action_rspamd = jsondata['action_rspamd']
+
+            confPath = "/etc/rspamd/local.d/antivirus.conf"
+
+            f = open(confPath, "r")
+            dataa = f.read()
+            f.close()
+            data = dataa.splitlines()
+
+            writeDataToFile = open(confPath, "w")
+            for items in data:
+                if items.find('enabled ') > -1:
+                    if status == True:
+                        command = 'systemctl start rspamd'
+                        ProcessUtilities.executioner(command)
+                        newitem = 'enabled = true'
+                        writeDataToFile.writelines(newitem + '\n')
+
+                    elif status == False:
+
+                        command = 'systemctl stop rspamd'
+                        ProcessUtilities.executioner(command)
+                        newitem = 'enabled = false'
+                        writeDataToFile.writelines(newitem + '\n')
+                elif items.find('action =') > -1:
+                    if action_rspamd == 'Reject':
+                        newitem = '  action = "reject";'
+                        writeDataToFile.writelines(newitem + '\n')
+                    elif action_rspamd == 'Unset':
+                        newitem = '  action = "unset";'
+                        writeDataToFile.writelines(newitem + '\n')
+
+                elif items.find('scan_mime_parts') > -1:
+                    if scan_mime_parts == True:
+                        newitem = '  scan_mime_parts = true;'
+                        writeDataToFile.writelines(newitem + '\n')
+                    elif scan_mime_parts == False:
+                        newitem = '  scan_mime_parts = false;'
+                        writeDataToFile.writelines(newitem + '\n')
+                elif items.find('log_clean =') > -1:
+                    if log_clean == True:
+                        newitem = '  log_clean = true;'
+                        writeDataToFile.writelines(newitem + '\n')
+                    elif log_clean == False:
+                        newitem = '  log_clean = false;'
+                        writeDataToFile.writelines(newitem + '\n')
+                elif items.find('max_size =') > -1:
+                    newitem = '  max_size = %s;'%max_size
+                    writeDataToFile.writelines(newitem + '\n')
+                elif items.find('CLAMAV_VIRUS =') > -1:
+                    newitem = '    CLAMAV_VIRUS = "%s";' % CLAMAV_VIRUS
+                    writeDataToFile.writelines(newitem + '\n')
+                elif items.find('servers =') > -1:
+                    newitem = '  servers = "%s";' % server
+                    writeDataToFile.writelines(newitem + '\n')
+                else:
+                    writeDataToFile.writelines(items + '\n')
+
+
+            print("1,None")
+            return 1, 'None'
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[changeRspamdConfig]")
+            str((msg) + " [changeRspamdConfig]")
+            print(0, str(msg))
+            return [0, str(msg) + " [changeRspamdConfig]"]
+
+
+    @staticmethod
+    def changePostfixConfig(install , changePostfixConfig):
+        try:
+            tempfilepath = "/home/cyberpanel/tempfilepostfixconfigs"
+            file = open(tempfilepath, "r")
+            jsondata1 = file.read()
+            jsondata = json.loads(jsondata1)
+            file.close()
+            non_smtpd_milters = jsondata['non_smtpd_milters']
+            smtpd_milters = jsondata['smtpd_milters']
+
+            postfixpath = "/etc/postfix/main.cf"
+
+            f = open(postfixpath, "r")
+            dataa = f.read()
+            f.close()
+            data = dataa.splitlines()
+
+            writeDataToFile = open(postfixpath, "w")
+            for i in data:
+                if (i.find('smtpd_milters=') > -1 or i.find('smtpd_milters =') > -1) and i.find('non_smtpd_milters') < 0:
+                    newitem = f'smtpd_milters = inet:127.0.0.1:8891, {smtpd_milters}\n'
+                    writeDataToFile.writelines(newitem + '\n')
+                elif i.find('non_smtpd_milters=') > -1 or i.find('non_smtpd_milters =') > -1:
+                    #newitem = 'non_smtpd_milters=%s' % non_smtpd_milters
+                    writeDataToFile.writelines('non_smtpd_milters = $smtpd_milters\n')
+                else:
+                    writeDataToFile.writelines(i + '\n')
+
+            print("1,None")
+            return 1, 'None'
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[changePostfixConfig]")
+            str((msg) + " [changePostfixConfig]")
+            print(0, str(msg))
+            return [0, str(msg) + " [changePostfixConfig]"]
+
+    @staticmethod
+    def changeRedisxConfig(install, changeRedisxConfig):
+        try:
+            tempfilepath = "/home/cyberpanel/saveRedisConfigurations"
+            file = open(tempfilepath, "r")
+            jsondata1 = file.read()
+            jsondata = json.loads(jsondata1)
+            file.close()
+            write_servers = jsondata['write_servers']
+            read_servers = jsondata['read_servers']
+
+            Redispath = "/etc/rspamd/local.d/redis.conf"
+
+            f = open(Redispath, "r")
+            dataa = f.read()
+            f.close()
+            data = dataa.splitlines()
+
+            writeDataToFile = open(Redispath, "w")
+            for i in data:
+                if i.find('write_servers =') > -1:
+                    newitem = 'write_servers = "%s";' % write_servers
+                    writeDataToFile.writelines(newitem + '\n')
+                elif i.find('read_servers =') > -1:
+                    newitem = 'read_servers = "%s";' % read_servers
+                    writeDataToFile.writelines(newitem + '\n')
+                else:
+                    writeDataToFile.writelines(i + '\n')
+            print("1,None")
+            return 1, 'None'
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[changeRedisxConfig]")
+            str((msg) + " [changeRedisxConfig]")
+            print(0, str(msg))
+            return [0, str(msg) + " [changeRedisxConfig]"]
+
+    @staticmethod
+    def changeclamavConfig(install, changeclamavConfig):
+        try:
+            tempfilepath = "/home/cyberpanel/saveclamavConfigurations"
+            file = open(tempfilepath, "r")
+            jsondata1 = file.read()
+            jsondata = json.loads(jsondata1)
+            file.close()
+            LogFile= jsondata['LogFile']
+            TCPAddr= jsondata['TCPAddr']
+            TCPSocket= jsondata['TCPSocket']
+            clamav_Debug= jsondata['clamav_Debug']
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                clamavconfpath = '/etc/clamd.d/scan.conf'
+            elif ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                clamavconfpath = "/etc/clamav/clamd.conf"
+
+            f = open(clamavconfpath, "r")
+            dataa = f.read()
+            f.close()
+            data = dataa.splitlines()
+
+            writeDataToFile = open(clamavconfpath, "w")
+            for i in data:
+                if i.find('TCPSocket') > -1:
+                    newitem = 'TCPSocket %s' % TCPSocket
+                    writeDataToFile.writelines(newitem + '\n')
+                elif i.find('TCPAddr') > -1:
+                    newitem = 'TCPAddr %s' % TCPAddr
+                    writeDataToFile.writelines(newitem + '\n')
+                elif i.find('LogFile') > -1:
+                    newitem = 'LogFile %s' % LogFile
+                    writeDataToFile.writelines(newitem + '\n')
+                elif i.find('Debug =') > -1:
+                    if clamav_Debug == True:
+                        newitem = 'Debug true'
+                        writeDataToFile.writelines(newitem + '\n')
+                    elif clamav_Debug == False:
+                        newitem = 'Debug false'
+                        writeDataToFile.writelines(newitem + '\n')
+                else:
+                    writeDataToFile.writelines(i + '\n')
+
+            return 1, 'None'
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile(str(msg) + "[changeclamavConfig]")
+            str((msg) + " [changeclamavConfig]")
+            print(0, str(msg))
+            return [0, str(msg) + " [changeclamavConfig]"]
+
     @staticmethod
     def installMailScanner(install, SpamAssassin):
         try:
@@ -549,7 +1384,7 @@ milter_default_action = accept
             command = "cat " + path
             output = ProcessUtilities.outputExecutioner(command)
 
-            if output.find('content_filter=spamassassin') > -1:
+            if output.find('spamassassin') > -1 and output.find('user=spamd') > -1:
                 return 1
             else:
                 return 0
@@ -745,6 +1580,124 @@ milter_default_action = accept
                 str(msg) + "  [checkIfMailScannerInstalled]")
             return 0
 
+    @staticmethod
+    def checkIfRspamdInstalled():
+        try:
+            if os.path.exists('/etc/rspamd/rspamd.conf'):
+                return 1
+            else:
+                return 0
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile(
+                str(msg) + "  [checkIfMailScannerInstalled]")
+            return 0
+
+    @staticmethod
+    def FetchPostfixHostname():
+        try:
+            PostfixPath = '/etc/postfix/main.cf'
+            if os.path.exists(PostfixPath):
+                PostFixConf = open(PostfixPath, 'r').readlines()
+
+                for line in PostFixConf:
+                    if line.find('myhostname') > -1:
+                        hostname = line.split('=')[1].strip(' ').rstrip('\n')
+                        return hostname
+            else:
+                return 'localhost'
+        except:
+            return 'localhost'
+
+    @staticmethod
+    def reverse_dns_lookup(ip_address):
+        try:
+            import requests
+
+            fetchURLs = requests.get('https://cyberpanel.net/dnsServers.txt')
+
+            if fetchURLs.status_code == 200:
+
+                urls = fetchURLs.json()['urls']
+
+                if os.path.exists(ProcessUtilities.debugPath):
+                    logging.CyberCPLogFileWriter.writeToFile(f'DNS urls {urls}.')
+
+                results = []
+
+                ###
+
+                for url in urls:
+                    try:
+                        response = requests.get(f'{url}/index.php?ip={ip_address}', timeout=5)
+
+                        if os.path.exists(ProcessUtilities.debugPath):
+                            logging.CyberCPLogFileWriter.writeToFile(f'url to call {ip_address} is {url}')
+
+                        if response.status_code == 200:
+                            data = response.json()
+
+                            if os.path.exists(ProcessUtilities.debugPath):
+                                logging.CyberCPLogFileWriter.writeToFile(f'response from dns system {str(data)}')
+
+                            if data['status'] == 1:
+                                results.append(data['results']['8.8.8.8'])
+                                results.append(data['results']['1.1.1.1'])
+                                results.append(data['results']['9.9.9.9'])
+                    except:
+                        pass
+
+                if os.path.exists(ProcessUtilities.debugPath):
+                    logging.CyberCPLogFileWriter.writeToFile(f'rDNS result of {ip_address} is {str(results)}')
+
+                ###
+
+                return results
+        except BaseException as e:
+            logging.CyberCPLogFileWriter.writeToFile(f'Error in fetch rDNS {str(msg)}')
+            # Handle errors, e.g., if reverse DNS lookup fails
+            return []
+
+    @staticmethod
+    def SaveEmailLimitsNew(tempPath):
+        try:
+            content = open(tempPath, 'r').read()
+            email = content.split(' ')[0]
+            path = '/etc/rspamd/badusers.map'
+
+            WriteCheck = 0
+
+            if os.path.exists(path):
+                data = open(path, 'r').readlines()
+
+                WriteToFile = open(path, 'w')
+                
+                for line in data:
+                    if line.find(email) > -1:
+                        WriteToFile.write(content)
+                        WriteCheck = 1
+                    else:
+                        WriteToFile.write(line)
+
+                if WriteCheck == 0:
+                    WriteToFile.write(content)
+
+                WriteToFile.close()
+
+            else:
+                WriteToFile = open(path, 'w')
+                WriteToFile.write(content)
+                WriteToFile.close()
+
+            command = 'systemctl restart rspamd'
+            ProcessUtilities.executioner(command)
+
+            print(f'1,None')
+
+        except BaseException as msg:
+            print(f'0,{str(msg)}')
+
+
+
     ####### Imported below functions from mailserver/mailservermanager, need to refactor later
 
 class MailServerManagerUtils(multi.Thread):
@@ -773,6 +1726,10 @@ class MailServerManagerUtils(multi.Thread):
                 for items in postFixLines:
                     if items.find('myhostname') > -1 and items[0] != '#':
                         self.mailHostName = items.split('=')[1].strip(' ')
+
+                        if os.path.exists(ProcessUtilities.debugPath):
+                            logging.CyberCPLogFileWriter.writeToFile(f'Mail server SSL is issued with value: {self.mailHostName}')
+
                         self.MailSSL = 1
             except BaseException as msg:
                 self.MailSSL = 0
@@ -812,14 +1769,41 @@ class MailServerManagerUtils(multi.Thread):
             final_json = json.dumps(final_dic)
             return HttpResponse(final_json)
 
+
+    def FetchCloudLinuxAlmaVersionVersion(self):
+        if os.path.exists('/etc/os-release'):
+            data = open('/etc/os-release', 'r').read()
+            if (data.find('CloudLinux') > -1 or data.find('cloudlinux') > -1) and (
+                    data.find('8.9') > -1 or data.find('Anatoly Levchenko') > -1 or data.find('VERSION="8.') > -1):
+                return 'cl-89'
+            elif (data.find('CloudLinux') > -1 or data.find('cloudlinux') > -1) and (
+                    data.find('8.8') > -1 or data.find('Anatoly Filipchenko') > -1):
+                return 'cl-88'
+            elif (data.find('CloudLinux') > -1 or data.find('cloudlinux') > -1) and (
+                    data.find('9.4') > -1 or data.find('VERSION="9.') > -1):
+                return 'cl-88'
+            elif (data.find('AlmaLinux') > -1 or data.find('almalinux') > -1) and (
+                    data.find('8.9') > -1 or data.find('Midnight Oncilla') > -1 or data.find('VERSION="8.') > -1):
+                return 'al-88'
+            elif (data.find('AlmaLinux') > -1 or data.find('almalinux') > -1) and (
+                    data.find('8.7') > -1 or data.find('Stone Smilodon') > -1):
+                return 'al-87'
+            elif (data.find('AlmaLinux') > -1 or data.find('almalinux') > -1) and (
+                    data.find('9.4') > -1 or data.find('9.3') > -1 or data.find('Shamrock Pampas') > -1 or data.find(
+                    'Seafoam Ocelot') > -1 or data.find('VERSION="9.') > -1):
+                return 'al-93'
+        else:
+            return -1
+
     def install_postfix_dovecot(self):
         try:
+
             if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
-                command = 'yum remove postfix -y'
-                ProcessUtilities.executioner(command)
-            elif ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
-                command = 'apt-get -y remove postfix'
-                ProcessUtilities.executioner(command)
+                command = 'yum remove postfix* dovecot* -y'
+                ProcessUtilities.executioner(command, None, True)
+            elif ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                command = 'apt-get -y remove postfix* dovecot*'
+                ProcessUtilities.executioner(command, None, True)
 
             ### On Ubuntu 18 find if old dovecot and remove
 
@@ -827,7 +1811,7 @@ class MailServerManagerUtils(multi.Thread):
                 try:
 
                     command = 'apt-get purge dovecot* -y'
-                    os.system(command)
+                    ProcessUtilities.executioner(command, None, True)
 
                     command = 'apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 18A348AEED409DA1'
                     ProcessUtilities.executioner(command)
@@ -848,19 +1832,26 @@ class MailServerManagerUtils(multi.Thread):
 
             if ProcessUtilities.decideDistro() == ProcessUtilities.centos:
 
-                command = 'yum --nogpg install https://mirror.ghettoforge.org/distributions/gf/gf-release-latest.gf.el7.noarch.rpm -y'
+                command = 'yum --nogpg install https://mirror.ghettoforge.net/distributions/gf/gf-release-latest.gf.el7.noarch.rpm -y'
                 ProcessUtilities.executioner(command)
 
                 command = 'yum install --enablerepo=gf-plus -y postfix3 postfix3-ldap postfix3-mysql postfix3-pcre'
             elif ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
 
-                command = 'dnf --nogpg install -y https://mirror.ghettoforge.org/distributions/gf/el/8/gf/x86_64/gf-release-8-11.gf.el8.noarch.rpm'
-                ProcessUtilities.executioner(command)
+                clAPVersion = self.FetchCloudLinuxAlmaVersionVersion()
+                type = clAPVersion.split('-')[0]
+                version = int(clAPVersion.split('-')[1])
+
+                if type == 'al' and version >= 90:
+                    command = 'dnf --nogpg install -y https://mirror.ghettoforge.net/distributions/gf/gf-release-latest.gf.el9.noarch.rpm'
+                    ProcessUtilities.executioner(command)
+
+                else:
+                    command = 'dnf --nogpg install -y https://mirror.ghettoforge.net/distributions/gf/gf-release-latest.gf.el8.noarch.rpm'
+                    ProcessUtilities.executioner(command)
 
                 command = 'dnf install --enablerepo=gf-plus postfix3 postfix3-mysql -y'
-                ProcessUtilities.executioner(command)
             else:
-
 
                 import socket
                 command = 'apt-get install -y debconf-utils'
@@ -1038,6 +2029,9 @@ class MailServerManagerUtils(multi.Thread):
 
     def centos_lib_dir_to_ubuntu(self, filename, old, new):
         try:
+            #command = "sed -i 's|%s|%s|g' %s" % (old, new, filename)
+            #ProcessUtilities.executioner(command, None, True)
+
             fd = open(filename, 'r')
             lines = fd.readlines()
             fd.close()
@@ -1101,7 +2095,7 @@ class MailServerManagerUtils(multi.Thread):
             ProcessUtilities.executioner(command)
 
             # Cleanup config files for ubuntu
-            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
                 self.centos_lib_dir_to_ubuntu("/usr/local/CyberCP/install/email-configs-one/master.cf", "/usr/libexec/",
                                               "/usr/lib/")
                 self.centos_lib_dir_to_ubuntu("/usr/local/CyberCP/install/email-configs-one/main.cf",
@@ -1237,7 +2231,7 @@ class MailServerManagerUtils(multi.Thread):
             command = "chmod 755 " + main
             ProcessUtilities.executioner(command)
 
-            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
                 command = "mkdir -p /etc/pki/dovecot/private/"
                 ProcessUtilities.executioner(command)
 
@@ -1252,7 +2246,7 @@ class MailServerManagerUtils(multi.Thread):
 
                 ## Ubuntu 18.10 ssl_dh for dovecot 2.3.2.1
 
-                if ProcessUtilities.ubuntu:
+                if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
                     dovecotConf = '/etc/dovecot/dovecot.conf'
 
                     data = open(dovecotConf, 'r').readlines()
@@ -1428,6 +2422,62 @@ class MailServerManagerUtils(multi.Thread):
 
         ###
 
+    def installOpenDKIMNew(self):
+        try:
+            logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                      'Installing opendkim..,40')
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos:
+
+                command = 'yum -y erase opendkim*'
+                os.system(command)
+
+                command = 'yum -y install opendkim'
+            elif ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+
+                command = 'yum -y erase opendkim*'
+                os.system(command)
+
+                command = 'dnf install opendkim -y'
+            else:
+
+                command = 'apt-get -y purge opendkim'
+                os.system(command)
+
+                command = 'DEBIAN_FRONTEND=noninteractive apt-get -y install opendkim'
+
+            os.system(command)
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                command = 'dnf install opendkim-tools -y'
+                ProcessUtilities.executioner(command)
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                command = 'apt install opendkim-tools -y'
+                ProcessUtilities.executioner(command)
+
+                command = 'mkdir -p /etc/opendkim/keys/'
+                ProcessUtilities.executioner(command)
+
+
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                      '%s [installOpenDKIM][404]' % (str(msg)), 10)
+            return 0
+
+        return 1
+
+    def SetupDKIMFromResetMail(self):
+        from plogical.dnsUtilities import DNS
+
+        for website in Websites.objects.all():
+            mailUtilities.setupDKIM(website.domain)
+            DNS.createDKIMRecords(website.domain)
+
+        for website in ChildDomains.objects.all():
+            mailUtilities.setupDKIM(website.domain)
+            DNS.createDKIMRecords(website.domain)
+
     def ResetEmailConfigurations(self):
         try:
             ### Check if remote or local mysql
@@ -1490,10 +2540,17 @@ class MailServerManagerUtils(multi.Thread):
             logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
                                                       'Restoring OpenDKIM configurations..,70')
 
+            if self.installOpenDKIMNew() == 0:
+                logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                          'Install OpenDKIM failed. [404].')
+                return 0
+
             if self.configureOpenDKIM() == 0:
                 logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
                                                           'configureOpenDKIM failed. [404].')
                 return 0
+
+            self.SetupDKIMFromResetMail()
 
             if self.MailSSL:
                 logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
@@ -1502,6 +2559,8 @@ class MailServerManagerUtils(multi.Thread):
                 virtualHostUtilities.issueSSLForMailServer(self.mailHostName,
                                                            '/home/%s/public_html' % (self.mailHostName))
 
+
+            MailServerSSLCheck = 0
             from websiteFunctions.models import ChildDomains
             from plogical.virtualHostUtilities import virtualHostUtilities
             for websites in Websites.objects.all():
@@ -1513,9 +2572,47 @@ class MailServerManagerUtils(multi.Thread):
                 except:
                     pass
 
+                if self.MailSSL == 0 and MailServerSSLCheck == 0:
+                    logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                              'Setting up Mail Server SSL as no hostname SSL found..,80')
+                    from plogical.virtualHostUtilities import virtualHostUtilities
+                    virtualHostUtilities.issueSSLForMailServer(websites.domain,
+                                                               '/home/%s/public_html' % (websites.domain))
+                    MailServerSSLCheck = 1
+
+
+
+
             logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'], 'Fixing permissions..,90')
 
             self.fixCyberPanelPermissions()
+
+            command = '/usr/local/CyberCP/bin/python /usr/local/CyberCP/dns/dnsManager.py ResetDNSConfigurations --tempStatusPath /home/cyberpanel/dnscheck'
+            ProcessUtilities.executioner(command)
+
+            command = 'touch /home/cyberpanel/postfix'
+            ProcessUtilities.executioner(command)
+
+            ###
+
+            etcResolve = '/etc/resolv.conf'
+
+            if os.path.exists(etcResolve):
+                dataEtcResolv = open(etcResolve, 'r').read()
+            else:
+                dataEtcResolv = ''
+
+
+            if len(dataEtcResolv) < 4:
+                writeToFile = open(etcResolve, 'w')
+                writeToFile.write('nameserver 8.8.8.8\n')
+                writeToFile.close()
+
+                command = 'systemctl restart postfix'
+                ProcessUtilities.executioner(command)
+
+                command = 'systemctl restart dovecot'
+                ProcessUtilities.executioner(command)
 
             logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'], 'Completed [200].')
 
@@ -1525,6 +2622,10 @@ class MailServerManagerUtils(multi.Thread):
 
     def configureOpenDKIM(self):
         try:
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                command = 'dnf install opendkim-tools -y'
+                ProcessUtilities.executioner(command)
 
             ## Configure OpenDKIM specific settings
 
@@ -1557,11 +2658,11 @@ milter_default_action = accept
             writeToFile.write(configData)
             writeToFile.close()
 
-            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20 or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
                 data = open(openDKIMConfigurePath, 'r').readlines()
                 writeToFile = open(openDKIMConfigurePath, 'w')
                 for items in data:
-                    if items.find('Socket') > -1 and items.find('local:') and items[0] != '#':
+                    if items.find('Socket') > -1 and items.find('local:') > -1:
                         writeToFile.writelines('Socket  inet:8891@localhost\n')
                     else:
                         writeToFile.writelines(items)
@@ -1641,14 +2742,30 @@ def main():
         mailUtilities.savePolicyServerStatus(args.install)
     elif args.function == 'installSpamAssassin':
         mailUtilities.installSpamAssassin("install", "SpamAssassin")
+    elif args.function == 'installRspamd':
+        mailUtilities.installRspamd("install", "rspamd")
+    elif args.function == 'uninstallRspamd':
+        mailUtilities.uninstallRspamd("install", "rspamd")
     elif args.function == 'installMailScanner':
         mailUtilities.installMailScanner("install", "installMailScanner")
+    elif args.function == 'changeRspamdConfig':
+        mailUtilities.changeRspamdConfig("install", "changeRspamdConfig")
+    elif args.function == 'changePostfixConfig':
+        mailUtilities.changePostfixConfig("install", "changePostfixConfig")
+    elif args.function == 'changeRedisxConfig':
+        mailUtilities.changeRedisxConfig("install", "changeRedisxConfig")
+    elif args.function == 'changeclamavConfig':
+        mailUtilities.changeclamavConfig("install", "changeclamavConfig")
     elif args.function == 'AfterEffects':
         mailUtilities.AfterEffects(args.domain)
     elif args.function == "ResetEmailConfigurations":
         extraArgs = {'tempStatusPath': args.tempStatusPath}
         background = MailServerManagerUtils(None, 'ResetEmailConfigurations', extraArgs)
         background.ResetEmailConfigurations()
+    elif args.function == 'SetupEmailLimits':
+        mailUtilities.SetupEmailLimits()
+    elif args.function == 'SaveEmailLimitsNew':
+        mailUtilities.SaveEmailLimitsNew(args.tempConfigPath)
 
 if __name__ == "__main__":
     main()

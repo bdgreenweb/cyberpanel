@@ -52,14 +52,14 @@ class backupSchedule:
             backupSchedule.remoteBackupLogging(backupLogPath, "Starting local backup for: " + virtualHost)
 
             ###
-
-            pathToFile = "/home/cyberpanel/" + str(randint(1000, 9999))
+            randNBR = str(randint(10**9, 10**10 - 1))
+            pathToFile = "/home/cyberpanel/" + randNBR
             file = open(pathToFile, "w+")
             file.close()
 
             port = ProcessUtilities.fetchCurrentPort()
 
-            finalData = json.dumps({'randomFile': pathToFile, 'websiteToBeBacked': virtualHost})
+            finalData = json.dumps({'randomFile': randNBR, 'websiteToBeBacked': virtualHost})
             r = requests.post("https://localhost:%s/backup/localInitiate" % (port), data=finalData, verify=False)
 
             if os.path.exists(ProcessUtilities.debugPath):
@@ -89,8 +89,21 @@ class backupSchedule:
 
                 ifRunning = ProcessUtilities.outputExecutioner('ps aux')
 
+                if os.path.exists('/usr/local/CyberCP/debug'):
+                    message = 'Output of px aux when running remote backup status check: %s' % (ifRunning)
+                    logging.CyberCPLogFileWriter.writeToFile(message)
+
+
                 if (ifRunning.find('startBackup') > -1 or ifRunning.find('BackupRoot') > -1) and ifRunning.find('/%s/' % (backupDomain)):
+                    if os.path.exists('/usr/local/CyberCP/debug'):
+                        message = 'If running found.'
+                        logging.CyberCPLogFileWriter.writeToFile(message)
+
                     if os.path.exists(status):
+                        if os.path.exists('/usr/local/CyberCP/debug'):
+                            message = 'If running found. and status file exists'
+                            logging.CyberCPLogFileWriter.writeToFile(message)
+
                         status = open(status, 'r').read()
                         time.sleep(2)
 
@@ -115,6 +128,9 @@ class backupSchedule:
                             return 1, tempStoragePath
 
                         elif status.find("[5009]") > -1:
+                            if os.path.exists('/usr/local/CyberCP/debug'):
+                                message = 'If running found. status file exists but error'
+                                logging.CyberCPLogFileWriter.writeToFile(message)
                             ## removing status file, so that backup can re-run
                             try:
                                 command = 'sudo rm -f ' + status
@@ -150,6 +166,9 @@ class backupSchedule:
                             return 0, tempStoragePath
 
                         elif os.path.exists(schedulerPath):
+                            if os.path.exists('/usr/local/CyberCP/debug'):
+                                message = 'If running found. status file exists, scheduler path also exists hence killed'
+                                logging.CyberCPLogFileWriter.writeToFile(message)
                             backupSchedule.remoteBackupLogging(backupLogPath, 'Backup process killed. Error: %s' % (
                                 open(schedulerPath, 'r').read()),
                                                                backupSchedule.ERROR)
@@ -157,8 +176,15 @@ class backupSchedule:
                             command = 'rm -rf %s' % (tempStoragePath)
                             ProcessUtilities.normalExecutioner(command)
                             return 0, 'Backup process killed.'
+
                 else:
+                    if os.path.exists('/usr/local/CyberCP/debug'):
+                        message = 'If running not found.'
+                        logging.CyberCPLogFileWriter.writeToFile(message)
                     if os.path.exists(status):
+                        if os.path.exists('/usr/local/CyberCP/debug'):
+                            message = 'if running not found, Status file exists'
+                            logging.CyberCPLogFileWriter.writeToFile(message)
                         status = open(status, 'r').read()
                         time.sleep(2)
 
@@ -182,6 +208,11 @@ class backupSchedule:
                                 pass
                             return 1, tempStoragePath
                         elif os.path.exists(schedulerPath):
+
+                            if os.path.exists('/usr/local/CyberCP/debug'):
+                                message = 'if running not found, Status file exists, scheduler path exists thus killed.'
+                                logging.CyberCPLogFileWriter.writeToFile(message)
+
                             backupSchedule.remoteBackupLogging(backupLogPath, 'Backup process killed. Error: %s' % (open(schedulerPath, 'r').read()),
                                                            backupSchedule.ERROR)
                             os.remove(schedulerPath)
@@ -189,13 +220,23 @@ class backupSchedule:
                             ProcessUtilities.normalExecutioner(command)
                             return 0, 'Backup process killed.'
                     else:
+                        if os.path.exists('/usr/local/CyberCP/debug'):
+                            message = 'Status file does not exists.'
+                            logging.CyberCPLogFileWriter.writeToFile(message)
                         if killCounter == 1:
+
+                            if os.path.exists('/usr/local/CyberCP/debug'):
+                                message = 'if running not found, Status file  does not exists, kill counter 1, thus killed'
+                                logging.CyberCPLogFileWriter.writeToFile(message)
 
                             command = 'rm -rf %s' % (tempStoragePath)
                             ProcessUtilities.normalExecutioner(command)
 
                             return 0, 'Backup process killed without reporting any error. [184]'
                         elif os.path.exists(schedulerPath):
+                            if os.path.exists('/usr/local/CyberCP/debug'):
+                                message = 'if running not found, Status file does not exists, scheduler path found thus killed'
+                                logging.CyberCPLogFileWriter.writeToFile(message)
                             backupSchedule.remoteBackupLogging(backupLogPath, 'Backup process killed. Error: %s' % (
                                 open(schedulerPath, 'r').read()),
                                                                backupSchedule.ERROR)
@@ -277,11 +318,63 @@ class backupSchedule:
             ##
 
             writeToFile = open(backupLogPath, "a")
-            command = "scp -o StrictHostKeyChecking=no -P "+port+" -i /root/.ssh/cyberpanel " + backupPath + " " + user + "@" + IPAddress+":~/backup/" + ipAddressLocal + "/" + time.strftime("%m.%d.%Y_%H-%M-%S") + "/"
-            subprocess.call(shlex.split(command), stdout=writeToFile)
+            remote_dir = "~/backup/" + ipAddressLocal + "/" + time.strftime("%m.%d.%Y_%H-%M-%S") + "/"
+            command = "scp -o StrictHostKeyChecking=no -P "+port+" -i /root/.ssh/cyberpanel " + backupPath + " " + user + "@" + IPAddress+":" + remote_dir
+            
+            # Try scp first
+            result = subprocess.call(shlex.split(command), stdout=writeToFile)
 
             if os.path.exists(ProcessUtilities.debugPath):
                 logging.CyberCPLogFileWriter.writeToFile(command)
+
+            # If scp fails, try SFTP
+            if result != 0:
+                writeToFile.write("SCP failed, attempting SFTP transfer...\n")
+                try:
+                    import paramiko
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    
+                    # Try key-based auth first
+                    try:
+                        private_key = paramiko.RSAKey.from_private_key_file('/root/.ssh/cyberpanel')
+                        ssh.connect(IPAddress, port=int(port), username=user, pkey=private_key)
+                    except:
+                        # If key auth fails, connection setup failed
+                        raise Exception("Failed to connect with SSH key")
+                    
+                    # Create remote directory structure via SFTP
+                    sftp = ssh.open_sftp()
+                    
+                    # Convert ~ to actual home directory
+                    home_dir = sftp.normalize('.')
+                    remote_full_path = os.path.join(home_dir, 'backup', ipAddressLocal, time.strftime("%m.%d.%Y_%H-%M-%S"))
+                    
+                    # Create directory structure
+                    path_parts = remote_full_path.strip('/').split('/')
+                    current_path = '/'
+                    for part in path_parts:
+                        current_path = os.path.join(current_path, part)
+                        try:
+                            sftp.stat(current_path)
+                        except FileNotFoundError:
+                            try:
+                                sftp.mkdir(current_path)
+                            except:
+                                pass
+                    
+                    # Transfer file
+                    remote_file = os.path.join(remote_full_path, os.path.basename(backupPath))
+                    sftp.put(backupPath, remote_file)
+                    sftp.close()
+                    ssh.close()
+                    
+                    writeToFile.write(f"Successfully transferred {backupPath} to {remote_file} via SFTP\n")
+                    logging.CyberCPLogFileWriter.writeToFile(f"Successfully transferred backup via SFTP to {IPAddress}")
+                except BaseException as msg:
+                    writeToFile.write(f"SFTP transfer failed: {str(msg)}\n")
+                    logging.CyberCPLogFileWriter.writeToFile(f"SFTP transfer failed: {str(msg)}")
+                    raise
 
             ## Remove backups already sent to remote destinations
 

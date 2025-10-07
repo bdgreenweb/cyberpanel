@@ -136,7 +136,7 @@ class DNSManager:
             newZone = Domains(admin=admin, name=zoneDomain, type="MASTER")
             newZone.save()
 
-            content = "ns1." + zoneDomain + " hostmaster." + zoneDomain + " 1 10800 3600 604800 3600"
+            content = "ns1." + zoneDomain + " hostmaster." + zoneDomain + " 1 10800 3600 1209600 3600"
 
             soaRecord = Records(domainOwner=newZone,
                                 domain_id=newZone.id,
@@ -166,7 +166,10 @@ class DNSManager:
         else:
             finalData = {"status": 1}
 
-        finalData['domainsList'] = ACLManager.findAllDomains(currentACL, userID)
+        # Get DNS zones directly from the Domains table instead of just websites
+        finalData['domainsList'] = ACLManager.findAllDNSZones(currentACL, userID)
+
+
         template = 'dns/addDeleteDNSRecords.html'
         proc = httpProc(request, template, finalData, 'addDeleteRecords')
         return proc.render()
@@ -256,7 +259,12 @@ class DNSManager:
             zoneDomain = data['selectedZone']
             recordType = data['recordType']
             recordName = data['recordName']
+
             ttl = int(data['ttl'])
+            if ttl < 0:
+                raise ValueError("TTL: The item must be greater than 0")
+            elif ttl > 86400:
+                raise ValueError("TTL: The item must be lesser than 86401")
 
             admin = Administrator.objects.get(pk=userID)
             if ACLManager.checkOwnershipZone(zoneDomain, admin, currentACL) == 1:
@@ -444,6 +452,10 @@ class DNSManager:
 
             if data['ttlNow'] != None:
                 record.ttl = int(data['ttlNow'])
+                if record.ttl < 0:
+                    raise ValueError("TTL: The item must be greater than 0")
+                elif record.ttl > 86400:
+                    raise ValueError("TTL: The item must be lesser than 86401")
 
             if data['priorityNow'] != None:
                 record.prio = int(data['priorityNow'])
@@ -499,7 +511,8 @@ class DNSManager:
         else:
             finalData = {"status": 1}
 
-        finalData['domainsList'] = ACLManager.findAllDomains(currentACL, userID)
+        # Get DNS zones directly from the Domains table instead of just websites
+        finalData['domainsList'] = ACLManager.findAllDNSZones(currentACL, userID)
         template = 'dns/deleteDNSZone.html'
         proc = httpProc(request, template, finalData, 'deleteZone')
         return proc.render()
@@ -597,6 +610,21 @@ class DNSManager:
             writeToFile.write(nsContent.rstrip('\n'))
             writeToFile.close()
 
+            ###
+
+            import tldextract
+
+            no_cache_extract = tldextract.TLDExtract(cache_dir=None)
+
+            nsData = open(DNSManager.defaultNameServersPath, 'r').readlines()
+
+            for ns in nsData:
+                extractDomain = no_cache_extract(ns.rstrip('\n'))
+                topLevelDomain = extractDomain.domain + '.' + extractDomain.suffix
+
+                zone = Domains.objects.get(name=topLevelDomain)
+
+                DNS.createDNSRecord(zone, ns, 'A', ACLManager.fetchIP(), 0, 1400)
 
             final_dic = {'status': 1, 'error_message': "None"}
             final_json = json.dumps(final_dic)
@@ -689,7 +717,7 @@ class DNSManager:
 
             try:
                 zones = cf.zones.get(params=params)
-            except CloudFlare.CloudFlareAPIError as e:
+            except BaseException as e:
                 final_json = json.dumps({'status': 0, 'fetchStatus': 0, 'error_message': str(e), "data": '[]'})
                 return HttpResponse(final_json)
 
@@ -728,7 +756,7 @@ class DNSManager:
 
                 try:
                     dns_records = cf.zones.dns_records.get(zone_id, params={'per_page':50, 'type':fetchType})
-                except CloudFlare.exceptions.CloudFlareAPIError as e:
+                except BaseException as e:
                     final_json = json.dumps({'status': 0, 'fetchStatus': 0, 'error_message': str(e), "data": '[]'})
                     return HttpResponse(final_json)
 
@@ -795,7 +823,7 @@ class DNSManager:
 
             try:
                 zones = cf.zones.get(params=params)
-            except CloudFlare.CloudFlareAPIError as e:
+            except BaseException as e:
                 final_json = json.dumps({'status': 0, 'delete_status': 0, 'error_message': str(e), "data": '[]'})
                 return HttpResponse(final_json)
 
@@ -826,6 +854,10 @@ class DNSManager:
             recordType = data['recordType']
             recordName = data['recordName']
             ttl = int(data['ttl'])
+            if ttl < 0:
+                raise ValueError("TTL: The item must be greater than 0")
+            elif ttl > 86400:
+                raise ValueError("TTL: The item must be lesser than 86401")
 
             admin = Administrator.objects.get(pk=userID)
             self.admin = admin
@@ -843,7 +875,7 @@ class DNSManager:
 
             try:
                 zones = cf.zones.get(params=params)
-            except CloudFlare.CloudFlareAPIError as e:
+            except BaseException as e:
                 final_json = json.dumps({'status': 0, 'delete_status': 0, 'error_message': str(e), "data": '[]'})
                 return HttpResponse(final_json)
 
@@ -1086,14 +1118,11 @@ class DNSManager:
                 new_r_proxied_flag = True
 
             for dns_record in dns_records:
-                r_zone_id = dns_record['zone_id']
-                r_id = dns_record['id']
                 r_name = dns_record['name']
                 r_type = dns_record['type']
                 r_content = dns_record['content']
                 r_ttl = dns_record['ttl']
                 r_proxied = dns_record['proxied']
-                r_proxiable = dns_record['proxiable']
 
                 if r_proxied == new_r_proxied_flag:
                     # Nothing to do
@@ -1102,8 +1131,6 @@ class DNSManager:
                 dns_record_id = dns_record['id']
 
                 new_dns_record = {
-                    'zone_id': r_zone_id,
-                    'id': r_id,
                     'type': r_type,
                     'name': r_name,
                     'content': r_content,
@@ -1128,48 +1155,124 @@ class DNSManager:
             if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
 
                 command = 'systemctl stop systemd-resolved'
-                ProcessUtilities.executioner(command)
+                ProcessUtilities.executioner(command, 'root', True)
                 command = 'systemctl disable systemd-resolved.service'
-                ProcessUtilities.executioner(command)
+                ProcessUtilities.executioner(command, 'root', True)
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.ubuntu20:
+
+                command = 'DEBIAN_FRONTEND=noninteractive apt-get -y purge pdns-server pdns-backend-mysql -y'
+                ProcessUtilities.executioner(command, 'root', True)
+            else:
+                command = 'yum -y erase pdns pdns-backend-mysql'
+                ProcessUtilities.executioner(command, 'root', True)
 
 
-            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu:
+            #### new install
 
-                command = 'DEBIAN_FRONTEND=noninteractive apt-get -y remove pdns-server pdns-backend-mysql -y'
-                os.system(command)
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                try:
+                    os.rename('/etc/resolv.conf', 'etc/resolved.conf')
+                except OSError as e:
+                    if e.errno != errno.EEXIST and e.errno != errno.ENOENT:
+                        logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'], "[ERROR] Unable to rename /etc/resolv.conf to install PowerDNS: " +
+                                                 str(e) + "[404]")
+                        return 0
+                    try:
+                        os.remove('/etc/resolv.conf')
+                    except OSError as e1:
+                        logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                                  "[ERROR] Unable to remove existing /etc/resolv.conf to install PowerDNS: " +
+                            str(e1) + "[404]")
+                        return 0
 
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                # Update package list first
+                command = "DEBIAN_FRONTEND=noninteractive apt-get update"
+                ProcessUtilities.executioner(command, 'root', True)
+                
                 command = "DEBIAN_FRONTEND=noninteractive apt-get -y install pdns-server pdns-backend-mysql"
-                os.system(command)
+                result = ProcessUtilities.executioner(command, 'root', True)
+                
+                # Ensure service is stopped after installation for configuration
+                command = 'systemctl stop pdns || true'
+                ProcessUtilities.executioner(command, 'root', True)
+                
                 return 1
             else:
-
-                command = 'yum -y remove pdns pdns-backend-mysql'
-                os.system(command)
-
                 command = 'yum -y install pdns pdns-backend-mysql'
 
-            ProcessUtilities.executioner(command)
+            ProcessUtilities.executioner(command, 'root', True)
 
             return 1
 
         except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile('[ERROR] ' + str(msg) + " [installPowerDNS]")
+            logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                      '[ERROR] ' + str(msg) + " [installPowerDNS][404]")
             return 0
 
     def installPowerDNSConfigurations(self, mysqlPassword):
         try:
 
-            if ProcessUtilities.decideDistro() == ProcessUtilities.cent8 or ProcessUtilities.decideDistro() == ProcessUtilities.centos:
+            ### let see if this is needed the chdir
+            cwd = os.getcwd()
+            os.chdir('/usr/local/CyberCP/install')
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
                 dnsPath = "/etc/pdns/pdns.conf"
             else:
                 dnsPath = "/etc/powerdns/pdns.conf"
+                # Ensure directory exists for Ubuntu
+                dnsDir = os.path.dirname(dnsPath)
+                if not os.path.exists(dnsDir):
+                    try:
+                        os.makedirs(dnsDir, mode=0o755)
+                    except OSError as e:
+                        if e.errno != errno.EEXIST:
+                            raise
 
             import shutil
-
+            # Backup existing config if it exists
             if os.path.exists(dnsPath):
-                os.remove(dnsPath)
-                shutil.copy("/usr/local/CyberCP/install/dns-one/pdns.conf", dnsPath)
-            else:
-                shutil.copy("/usr/local/CyberCP/install/dns-one/pdns.conf", dnsPath)
+                try:
+                    shutil.move(dnsPath, dnsPath + '.bak')
+                except:
+                    os.remove(dnsPath)
+            
+            shutil.copy("dns-one/pdns.conf", dnsPath)
+            
+            # Verify the file was copied and has MySQL backend configuration
+            try:
+                with open(dnsPath, "r") as f:
+                    content = f.read()
+                    if not content or "launch=gmysql" not in content:
+                        writeToFile.writeToFile("PowerDNS config incomplete, attempting to fix...")
+                        logging.InstallLog.writeToFile("PowerDNS config incomplete, fixing...")
+                        
+                        # Directly write the essential MySQL configuration
+                        mysql_config = """# PowerDNS MySQL Backend Configuration
+launch=gmysql
+gmysql-host=localhost
+gmysql-port=3306
+gmysql-user=cyberpanel
+gmysql-password=""" + mysqlPassword + """
+gmysql-dbname=cyberpanel
+
+# Basic PowerDNS settings
+daemon=no
+guardian=no
+setgid=pdns
+setuid=pdns
+"""
+                        # Write complete config
+                        with open(dnsPath, "w") as f:
+                            f.write(mysql_config)
+                        
+                        writeToFile.writeToFile("MySQL backend configuration written directly")
+            except Exception as e:
+                writeToFile.writeToFile("Warning: Could not verify config content: " + str(e))
+                # Continue anyway as the file copy might have worked
 
             data = open(dnsPath, "r").readlines()
 
@@ -1183,18 +1286,35 @@ class DNSManager:
                 else:
                     writeDataToFile.writelines(items)
 
-            writeDataToFile.close()
+            # if self.distro == ubuntu:
+            #    os.fchmod(writeDataToFile.fileno(), stat.S_IRUSR | stat.S_IWUSR)
 
+            writeDataToFile.close()
 
             if self.remotemysql == 'ON':
                 command = "sed -i 's|gmysql-host=localhost|gmysql-host=%s|g' %s" % (self.mysqlhost, dnsPath)
-                ProcessUtilities.executioner(command)
+                ProcessUtilities.executioner(command, 'root', True)
 
                 command = "sed -i 's|gmysql-port=3306|gmysql-port=%s|g' %s" % (self.mysqlport, dnsPath)
-                ProcessUtilities.executioner(command)
+                ProcessUtilities.executioner(command, 'root', True)
+
+            # Set proper permissions for PowerDNS config
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                # Ensure pdns user/group exists
+                command = 'id -u pdns &>/dev/null || useradd -r -s /usr/sbin/nologin pdns'
+                ProcessUtilities.executioner(command, 'root', True)
+                
+                command = 'chown root:pdns %s' % dnsPath
+                ProcessUtilities.executioner(command, 'root', True)
+                
+                command = 'chmod 640 %s' % dnsPath
+                ProcessUtilities.executioner(command, 'root', True)
 
             return 1
         except IOError as msg:
+            logging.CyberCPLogFileWriter.writeToFile('[ERROR] ' + str(msg) + " [installPowerDNSConfigurations]")
+            logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                      '[ERROR] ' + str(msg) + " [installPowerDNSConfigurations][404]")
             return 0
 
     def startPowerDNS(self):
@@ -1204,8 +1324,22 @@ class DNSManager:
         command = 'systemctl enable pdns'
         ProcessUtilities.executioner(command)
 
+        # Give PowerDNS time to read configuration
+        import time
+        time.sleep(2)
+
         command = 'systemctl start pdns'
-        ProcessUtilities.executioner(command)
+        result = ProcessUtilities.executioner(command)
+        
+        # Check if service started successfully
+        command = 'systemctl is-active pdns'
+        output = ProcessUtilities.outputExecutioner(command)
+        
+        if output.strip() != 'active':
+            logging.CyberCPLogFileWriter.writeToFile('[ERROR] PowerDNS failed to start. Service status: ' + output)
+            logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'],
+                                                      '[ERROR] PowerDNS service failed to start properly [404]')
+            return 0
 
         return 1
 
@@ -1269,8 +1403,7 @@ class DNSManager:
 
             logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'], 'Fixing permissions..,90')
 
-            from mailServer.mailserverManager import MailServerManager
-            MailServerManager(None, None, None).fixCyberPanelPermissions()
+            ACLManager.fixPermissions()
             logging.CyberCPLogFileWriter.statusWriter(self.extraArgs['tempStatusPath'], 'Completed [200].')
 
         except BaseException as msg:

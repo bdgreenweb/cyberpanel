@@ -1,5 +1,12 @@
 #!/usr/local/CyberCP/bin/python
 import os,sys
+import random
+import string
+
+from ApachController.ApacheVhosts import ApacheVhost
+from manageServices.models import PDNSStatus
+from .processUtilities import ProcessUtilities
+
 sys.path.append('/usr/local/CyberCP')
 import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "CyberCP.settings")
@@ -7,13 +14,14 @@ django.setup()
 from loginSystem.models import Administrator, ACL
 from django.shortcuts import HttpResponse
 from packages.models import Package
-from websiteFunctions.models import Websites, ChildDomains, aliasDomains
+from websiteFunctions.models import Websites, ChildDomains, aliasDomains, DockerSites, WPSites
 import json
 from subprocess import call, CalledProcessError
 from shlex import split
 from .CyberCPLogFileWriter import CyberCPLogFileWriter as logging
 from dockerManager.models import Containers
 from re import compile
+
 class ACLManager:
 
 
@@ -139,7 +147,7 @@ class ACLManager:
                     or value.find("`") > -1 or value.find("$") > -1 or value.find("(") > -1 or value.find(")") > -1 \
                     or value.find("'") > -1 or value.find("[") > -1 or value.find("]") > -1 or value.find(
                 "{") > -1 or value.find("}") > -1 \
-                    or value.find(":") > -1 or value.find("<") > -1 or value.find(">") > -1:
+                    or value.find(":") > -1 or value.find("<") > -1 or value.find(">") > -1 or value.find("&") > -1:
                 return 1
             else:
                 return 0
@@ -402,9 +410,9 @@ class ACLManager:
         finalResponse = ACLManager.loadedACL(userID)
 
         if finalResponse['admin'] == 1:
-            return Administrator.objects.all().exclude(pk=userID)
+            return Administrator.objects.all().exclude(pk=userID).order_by('userName')
         else:
-            admins = Administrator.objects.filter(owner=admin.pk)
+            admins = Administrator.objects.filter(owner=admin.pk).order_by('userName')
             for items in admins:
                 adminObjects.append(items)
 
@@ -539,25 +547,79 @@ class ACLManager:
         return websiteNames
 
     @staticmethod
-    def searchWebsiteObjects(currentACL, userID, searchTerm):
+    def getPHPString(phpVersion):
 
+        if phpVersion == "PHP 5.3":
+            php = "53"
+        elif phpVersion == "PHP 5.4":
+            php = "54"
+        elif phpVersion == "PHP 5.5":
+            php = "55"
+        elif phpVersion == "PHP 5.6":
+            php = "56"
+        elif phpVersion == "PHP 7.0":
+            php = "70"
+        elif phpVersion == "PHP 7.1":
+            php = "71"
+        elif phpVersion == "PHP 7.2":
+            php = "72"
+        elif phpVersion == "PHP 7.3":
+            php = "73"
+        elif phpVersion == "PHP 7.4":
+            php = "74"
+        elif phpVersion == "PHP 8.0":
+            php = "80"
+        elif phpVersion == "PHP 8.1":
+            php = "81"
+        elif phpVersion == "PHP 8.2":
+            php = "82"
+        elif phpVersion == "PHP 8.3":
+            php = "83"
+        elif phpVersion == "PHP 8.4":
+            php = "84"
+
+        return php
+
+    @staticmethod
+    def searchWebsiteObjects(currentACL, userID, searchTerm):
         if currentACL['admin'] == 1:
-            return Websites.objects.filter(domain__istartswith=searchTerm)
+            # Get websites that match the search term
+            websites = Websites.objects.filter(domain__istartswith=searchTerm)
+            # Get WordPress sites that match the search term
+            wp_sites = WPSites.objects.filter(title__icontains=searchTerm)
+            # Add WordPress sites' parent websites to the results
+            for wp in wp_sites:
+                if wp.owner not in websites:
+                    websites = websites | Websites.objects.filter(pk=wp.owner.pk)
+            return websites
         else:
             websiteList = []
             admin = Administrator.objects.get(pk=userID)
 
+            # Get websites that match the search term
             websites = admin.websites_set.filter(domain__istartswith=searchTerm)
-
             for items in websites:
                 websiteList.append(items)
 
-            admins = Administrator.objects.filter(owner=admin.pk)
+            # Get WordPress sites that match the search term
+            wp_sites = WPSites.objects.filter(title__icontains=searchTerm)
+            for wp in wp_sites:
+                if wp.owner.admin == admin and wp.owner not in websiteList:
+                    websiteList.append(wp.owner)
 
+            admins = Administrator.objects.filter(owner=admin.pk)
             for items in admins:
+                # Get websites that match the search term
                 webs = items.websites_set.filter(domain__istartswith=searchTerm)
                 for web in webs:
-                    websiteList.append(web)
+                    if web not in websiteList:
+                        websiteList.append(web)
+                
+                # Get WordPress sites that match the search term
+                wp_sites = WPSites.objects.filter(title__icontains=searchTerm)
+                for wp in wp_sites:
+                    if wp.owner.admin == items and wp.owner not in websiteList:
+                        websiteList.append(wp.owner)
 
             return websiteList
 
@@ -585,6 +647,29 @@ class ACLManager:
             return websiteList
 
     @staticmethod
+    def findDockersiteObjects(currentACL, userID):
+        if currentACL['admin'] == 1:
+            return DockerSites.objects.all()
+        else:
+
+            DockersiteList = []
+            admin = Administrator.objects.get(pk=userID)
+
+            websites = admin.DockerSites_set.all()
+
+            for items in websites:
+                DockersiteList.append(items)
+
+            admins = Administrator.objects.filter(owner=admin.pk)
+
+            for items in admins:
+                webs = items.DockerSites_set.all()
+                for web in webs:
+                    DockersiteList.append(web)
+
+            return DockersiteList
+
+    @staticmethod
     def findAllDomains(currentACL, userID):
         domainsList = []
 
@@ -592,12 +677,18 @@ class ACLManager:
             domains = Websites.objects.all().order_by('domain')
             for items in domains:
                 domainsList.append(items.domain)
+
+                for childs in items.childdomains_set.all():
+                    domainsList.append(childs.domain)
+
         else:
             admin = Administrator.objects.get(pk=userID)
             domains = admin.websites_set.all().order_by('domain')
 
             for items in domains:
                 domainsList.append(items.domain)
+                for childs in items.childdomains_set.all():
+                    domainsList.append(childs.domain)
 
             admins = Administrator.objects.filter(owner=admin.pk)
 
@@ -605,6 +696,8 @@ class ACLManager:
                 doms = items.websites_set.all().order_by('domain')
                 for dom in doms:
                     domainsList.append(dom.domain)
+                    for childs in dom.childdomains_set.all():
+                        domainsList.append(childs.domain)
 
         return domainsList
 
@@ -632,8 +725,32 @@ class ACLManager:
         return domainsList
 
     @staticmethod
+    def findAllDNSZones(currentACL, userID):
+        from dns.models import Domains
+        zonesList = []
+        
+        if currentACL['admin'] == 1:
+            zones = Domains.objects.all().order_by('name')
+            for zone in zones:
+                zonesList.append(zone.name)
+        else:
+            admin = Administrator.objects.get(pk=userID)
+            zones = Domains.objects.filter(admin=admin).order_by('name')
+            
+            for zone in zones:
+                zonesList.append(zone.name)
+            
+            # Include zones from owned admins
+            admins = Administrator.objects.filter(owner=admin.pk)
+            for item in admins:
+                owned_zones = Domains.objects.filter(admin=item).order_by('name')
+                for zone in owned_zones:
+                    zonesList.append(zone.name)
+        
+        return list(set(zonesList))  # Remove duplicates
+    
+    @staticmethod
     def checkOwnership(domain, admin, currentACL):
-
         try:
             childDomain = ChildDomains.objects.get(domain=domain)
 
@@ -673,19 +790,41 @@ class ACLManager:
         except:
             return 0
 
-
     @staticmethod
     def checkOwnershipZone(domain, admin, currentACL):
-        domain = Websites.objects.get(domain=domain)
-
+        # First check if user is admin
         if currentACL['admin'] == 1:
             return 1
-        elif domain.admin == admin:
-            return 1
-        elif domain.admin.owner == admin.pk:
-            return 1
-        else:
-            return 0
+            
+        # Try to find domain in Websites table
+        try:
+            websiteDomain = Websites.objects.get(domain=domain)
+            if websiteDomain.admin == admin or websiteDomain.admin.owner == admin.pk:
+                return 1
+        except:
+            pass
+            
+        # Try to find domain in ChildDomains table
+        try:
+            childDomain = ChildDomains.objects.get(domain=domain)
+            if childDomain.master.admin == admin or childDomain.master.admin.owner == admin.pk:
+                return 1
+        except:
+            pass
+            
+        # Try to find domain in DNS Domains table (for standalone DNS zones)
+        try:
+            from dns.models import Domains
+            dnsDomain = Domains.objects.get(name=domain)
+            if dnsDomain.admin == admin:
+                return 1
+            # Check if the DNS zone is owned by a user owned by current admin
+            if dnsDomain.admin.owner == admin.pk:
+                return 1
+        except:
+            pass
+            
+        return 0
 
     @staticmethod
     def executeCall(command):
@@ -810,14 +949,483 @@ class ACLManager:
         return 1
 
     @staticmethod
-    def CheckStatusFilleLoc(statusFile):
-        if (statusFile[:18] != "/home/cyberpanel/." or statusFile[:16] == "/home/cyberpanel" or statusFile[
-                                                                                                :4] == '/tmp' or statusFile[
+    def CheckStatusFilleLoc(statusFile, domain=None):
+        if statusFile.find('panel/') > -1:
+            TemFilePath = statusFile.split('panel/')[1]
+        else:
+            TemFilePath = statusFile.split('tmp/')[1]
+
+        try:
+            value = int(TemFilePath)
+            print(value)
+        except:
+            if domain != None:
+                value = statusFile.split('cyberpanel/')[1]
+                #logging.writeToFile(f'value of log file {value}')
+                if value == f'{domain}_rustic_backup_log':
+                    return 1
+            return 0
+
+        if (statusFile[:18] != "/home/cyberpanel/." or statusFile[:16] == "/home/cyberpanel" or statusFile[:4] == '/tmp' or statusFile[
                                                                                                                  :18] == '/usr/local/CyberCP') \
                 and statusFile != '/usr/local/CyberCP/CyberCP/settings.py' and statusFile.find(
             '..') == -1 and statusFile != '/home/cyberpanel/.my.cnf' and statusFile != '/home/cyberpanel/.bashrc' and statusFile != '/home/cyberpanel/.bash_logout' and statusFile != '/home/cyberpanel/.profile':
             return 1
         else:
             return 0
+
+    @staticmethod
+    def FetchExternalApp(domain):
+        try:
+            childDomain = ChildDomains.objects.get(domain=domain)
+
+            return childDomain.master.externalApp
+
+        except:
+            domainName = Websites.objects.get(domain=domain)
+            return domainName.externalApp
+
+    @staticmethod
+    def CreateSecureDir():
+        ### Check if upload path tmp dir is not available
+
+        UploadPath = '/usr/local/CyberCP/tmp/'
+
+        if not os.path.exists(UploadPath):
+            command = 'mkdir %s' % (UploadPath)
+            ProcessUtilities.executioner(command)
+
+        command = 'chown cyberpanel:cyberpanel %s' % (UploadPath)
+        ProcessUtilities.executioner(command)
+
+        command = 'chmod 711 %s' % (UploadPath)
+        ProcessUtilities.executioner(command)
+
+
+    @staticmethod
+    def GetServiceStatus(dic):
+        if os.path.exists('/home/cyberpanel/postfix'):
+            dic['emailAsWhole'] = 1
+        else:
+            dic['emailAsWhole'] = 0
+
+        if os.path.exists('/home/cyberpanel/pureftpd'):
+            dic['ftpAsWhole'] = 1
+        else:
+            dic['ftpAsWhole'] = 0
+
+        try:
+            pdns = PDNSStatus.objects.get(pk=1)
+            dic['dnsAsWhole'] = pdns.serverStatus
+        except:
+            if ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu or ProcessUtilities.decideDistro() == ProcessUtilities.ubuntu20:
+                pdnsPath = '/etc/powerdns'
+            else:
+                pdnsPath = '/etc/pdns'
+
+            if os.path.exists(pdnsPath):
+                PDNSStatus(serverStatus=1).save()
+                dic['dnsAsWhole'] = 1
+            else:
+                dic['dnsAsWhole'] = 0
+
+    @staticmethod
+    def GetALLWPObjects(currentACL, userID):
+        from websiteFunctions.models import WPSites
+
+        wpsites = WPSites.objects.none()
+        websites = ACLManager.findWebsiteObjects(currentACL, userID)
+
+        for website in websites:
+            wpsites |= website.wpsites_set.all()
+
+        return wpsites
+
+    @staticmethod
+    def GetServerIP():
+        ipFile = "/etc/cyberpanel/machineIP"
+        f = open(ipFile)
+        ipData = f.read()
+        return ipData.split('\n', 1)[0]
+
+    @staticmethod
+    def CheckForPremFeature(feature):
+        try:
+
+            if ProcessUtilities.decideServer() == ProcessUtilities.ent:
+                return 1
+
+            url = "https://platform.cyberpersons.com/CyberpanelAdOns/Adonpermission"
+            data = {
+                "name": feature,
+                "IP": ACLManager.GetServerIP()
+            }
+
+            import requests
+            response = requests.post(url, data=json.dumps(data))
+            return response.json()['status']
+        except:
+            return 1
+
+    @staticmethod
+    def CheckIPBackupObjectOwner(currentACL, backupobj, user):
+        if currentACL['admin'] == 1:
+            return 1
+        elif backupobj.owner == user:
+            return 1
+        else:
+            return 0
+
+    @staticmethod
+    def CheckIPPluginObjectOwner(currentACL, backupobj, user):
+        if currentACL['admin'] == 1:
+            return 1
+        elif backupobj.owner == user:
+            return 1
+        else:
+            return 0
+
+    @staticmethod
+    def FetchCloudFlareAPIKeyFromAcme():
+        try:
+
+            command = 'grep SAVED_CF_Key= /root/.acme.sh/account.conf | cut -d= -f2 | tr -d "\'"'
+            SAVED_CF_Key = ProcessUtilities.outputExecutioner(command).rstrip('\n')
+
+            command = 'grep SAVED_CF_Email= /root/.acme.sh/account.conf | cut -d= -f2 | tr -d "\'"'
+            SAVED_CF_Email = ProcessUtilities.outputExecutioner(command).rstrip('\n')
+
+            if len(SAVED_CF_Key) > 3 and len(SAVED_CF_Email) > 3:
+                return 1, SAVED_CF_Key, SAVED_CF_Email
+            else:
+                return 0, 'Key not defined', SAVED_CF_Email
+
+        except BaseException as msg:
+            return 0, str(msg), None
+
+
+    @staticmethod
+    def FindDocRootOfSite(vhostConf,domainName):
+        try:
+            if vhostConf == None:
+                vhostConf = f'/usr/local/lsws/conf/vhosts/{domainName}/vhost.conf'
+
+            if ProcessUtilities.decideServer() == ProcessUtilities.OLS:
+                command = "awk '/docRoot/ {print $2}' " + vhostConf
+                docRoot = ProcessUtilities.outputExecutioner(command, 'root', True).rstrip('\n')
+                #docRoot = docRoot.replace('$VH_ROOT', f'/home/{domainName}')
+                return docRoot
+            else:
+                command = "awk '/DocumentRoot/ {print $2; exit}' " + vhostConf
+                docRoot = ProcessUtilities.outputExecutioner(command, 'root', True).rstrip('\n')
+                return docRoot
+        except:
+            pass
+
+    @staticmethod
+    def ReplaceDocRoot(vhostConf, domainName, NewDocRoot):
+        try:
+            if vhostConf == None:
+                vhostConf = f'/usr/local/lsws/conf/vhosts/{domainName}/vhost.conf'
+
+            if ProcessUtilities.decideServer() == ProcessUtilities.OLS:
+                #command = f"sed -i 's/docRoot\s\s*.*/docRoot                   {NewDocRoot}/g " + vhostConf
+                command = f"sed -i 's#docRoot\s\s*.*#docRoot                   {NewDocRoot}#g' " + vhostConf
+                ProcessUtilities.executioner(command, 'root', True)
+            else:
+                command = f"sed -i 's#DocumentRoot\s\s*[^[:space:]]*#DocumentRoot {NewDocRoot}#g' " + vhostConf
+                ProcessUtilities.executioner(command, 'root', True)
+                
+        except:
+            pass
+
+    @staticmethod
+    def FindDocRootOfSiteApache(vhostConf, domainName):
+        try:
+            finalConfPath = ApacheVhost.configBasePath + domainName + '.conf'
+
+            if ProcessUtilities.decideServer() == ProcessUtilities.OLS:
+
+                if os.path.exists(finalConfPath):
+                    command = "awk '/DocumentRoot/ {print $2; exit}' " + finalConfPath
+                    docRoot = ProcessUtilities.outputExecutioner(command, 'root', True).rstrip('\n')
+                    return docRoot
+                else:
+                    return None
+            else:
+                return None
+
+        except:
+            return None
+
+    @staticmethod
+    def ReplaceDocRootApache(vhostConf, domainName, NewDocRoot):
+        try:
+            finalConfPath = ApacheVhost.configBasePath + domainName + '.conf'
+
+            if ProcessUtilities.decideServer() == ProcessUtilities.OLS:
+                command = f"sed -i 's#DocumentRoot\s\s*[^[:space:]]*#DocumentRoot {NewDocRoot}#g' " + finalConfPath
+                ProcessUtilities.executioner(command, 'root', True)
+        except:
+            pass
+
+
+    @staticmethod
+    def ISARM():
+
+        command = 'uname -a'
+        result = ProcessUtilities.outputExecutioner(command)
+
+        if result.find('aarch64') > -1:
+            return True
+        else:
+            return False
+
+    #### if you update this function needs to update this function on plogical.acl.py as well
+    @staticmethod
+    def fixPermissions():
+        try:
+
+            try:
+                def generate_pass(length=14):
+                    chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
+                    size = length
+                    return ''.join(random.choice(chars) for x in range(size))
+
+                content = """<?php
+$_ENV['snappymail_INCLUDE_AS_API'] = true;
+include '/usr/local/CyberCP/public/snappymail/index.php';
+
+$oConfig = \snappymail\Api::Config();
+$oConfig->SetPassword('%s');
+echo $oConfig->Save() ? 'Done' : 'Error';
+
+?>""" % (generate_pass())
+
+                writeToFile = open('/usr/local/CyberCP/public/snappymail.php', 'w')
+                writeToFile.write(content)
+                writeToFile.close()
+
+                command = "chown -R lscpd:lscpd /usr/local/lscp/cyberpanel/snappymail/data"
+                ProcessUtilities.executioner(command, 'root', True)
+
+            except:
+                pass
+
+
+            command = "usermod -G lscpd,lsadm,nobody lscpd"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "usermod -G lscpd,lsadm,nogroup lscpd"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ###### fix Core CyberPanel permissions
+
+            command = "find /usr/local/CyberCP -type d -exec chmod 0755 {} \;"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "find /usr/local/CyberCP -type f -exec chmod 0644 {} \;"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod -R 755 /usr/local/CyberCP/bin"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ## change owner
+
+            command = "chown -R root:root /usr/local/CyberCP"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ########### Fix LSCPD
+
+            command = "find /usr/local/lscp -type d -exec chmod 0755 {} \;"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "find /usr/local/lscp -type f -exec chmod 0644 {} \;"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod -R 755 /usr/local/lscp/bin"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod -R 755 /usr/local/lscp/fcgi-bin"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chown -R lscpd:lscpd /usr/local/CyberCP/public/phpmyadmin/tmp"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ## change owner
+
+            command = "chown -R root:root /usr/local/lscp"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chown -R lscpd:lscpd /usr/local/lscp/cyberpanel/rainloop"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod 700 /usr/local/CyberCP/cli/cyberPanel.py"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod 700 /usr/local/CyberCP/plogical/upgradeCritical.py"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod 755 /usr/local/CyberCP/postfixSenderPolicy/client.py"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chmod 640 /usr/local/CyberCP/CyberCP/settings.py"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "chown root:cyberpanel /usr/local/CyberCP/CyberCP/settings.py"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod +x /usr/local/CyberCP/CLManager/CLPackages.py'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            files = ['/etc/yum.repos.d/MariaDB.repo', '/etc/pdns/pdns.conf', '/etc/systemd/system/lscpd.service',
+                     '/etc/pure-ftpd/pure-ftpd.conf', '/etc/pure-ftpd/pureftpd-pgsql.conf',
+                     '/etc/pure-ftpd/pureftpd-mysql.conf', '/etc/pure-ftpd/pureftpd-ldap.conf',
+                     '/etc/dovecot/dovecot.conf', '/usr/local/lsws/conf/httpd_config.xml',
+                     '/usr/local/lsws/conf/modsec.conf', '/usr/local/lsws/conf/httpd.conf']
+
+            for items in files:
+                command = 'chmod 644 %s' % (items)
+                ProcessUtilities.executioner(command, 'root', True)
+
+            impFile = ['/etc/pure-ftpd/pure-ftpd.conf', '/etc/pure-ftpd/pureftpd-pgsql.conf',
+                       '/etc/pure-ftpd/pureftpd-mysql.conf', '/etc/pure-ftpd/pureftpd-ldap.conf',
+                       '/etc/dovecot/dovecot.conf', '/etc/pdns/pdns.conf', '/etc/pure-ftpd/db/mysql.conf',
+                       '/etc/powerdns/pdns.conf']
+
+            for items in impFile:
+                command = 'chmod 600 %s' % (items)
+                ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 640 /etc/postfix/*.cf'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 640 /etc/dovecot/*.conf'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 640 /etc/dovecot/dovecot-sql.conf.ext'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            fileM = ['/usr/local/lsws/FileManager/', '/usr/local/CyberCP/install/FileManager',
+                     '/usr/local/CyberCP/serverStatus/litespeed/FileManager',
+                     '/usr/local/lsws/Example/html/FileManager']
+
+            import shutil
+            for items in fileM:
+                try:
+                    shutil.rmtree(items)
+                except:
+                    pass
+
+            command = 'chmod 755 /etc/pure-ftpd/'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 644 /etc/dovecot/dovecot.conf'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 644 /etc/postfix/main.cf'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 644 /etc/postfix/dynamicmaps.cf'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod +x /usr/local/CyberCP/plogical/renew.py'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod +x /usr/local/CyberCP/CLManager/CLPackages.py'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            clScripts = ['/usr/local/CyberCP/CLScript/panel_info.py',
+                         '/usr/local/CyberCP/CLScript/CloudLinuxPackages.py',
+                         '/usr/local/CyberCP/CLScript/CloudLinuxUsers.py',
+                         '/usr/local/CyberCP/CLScript/CloudLinuxDomains.py'
+                , '/usr/local/CyberCP/CLScript/CloudLinuxResellers.py',
+                         '/usr/local/CyberCP/CLScript/CloudLinuxAdmins.py',
+                         '/usr/local/CyberCP/CLScript/CloudLinuxDB.py', '/usr/local/CyberCP/CLScript/UserInfo.py']
+
+            for items in clScripts:
+                command = 'chmod +x %s' % (items)
+                ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 600 /usr/local/CyberCP/plogical/adminPass.py'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 600 /etc/cagefs/exclude/cyberpanelexclude'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = "find /usr/local/CyberCP/ -name '*.pyc' -delete"
+            ProcessUtilities.executioner(command, 'root', True)
+
+            if ProcessUtilities.decideDistro() == ProcessUtilities.centos or ProcessUtilities.decideDistro() == ProcessUtilities.cent8:
+                command = 'chown root:pdns /etc/pdns/pdns.conf'
+                ProcessUtilities.executioner(command, 'root', True)
+
+                command = 'chmod 640 /etc/pdns/pdns.conf'
+                ProcessUtilities.executioner(command, 'root', True)
+            else:
+                command = 'chown root:pdns /etc/powerdns/pdns.conf'
+                ProcessUtilities.executioner(command, 'root', True)
+
+                command = 'chmod 640 /etc/powerdns/pdns.conf'
+                ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 640 /usr/local/lscp/cyberpanel/logs/access.log'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = '/usr/local/lsws/lsphp83/bin/php /usr/local/CyberCP/public/snappymail.php'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 600 /usr/local/CyberCP/public/snappymail.php'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ###
+
+            WriteToFile = open('/etc/fstab', 'a')
+            WriteToFile.write('proc    /proc        proc        defaults,hidepid=2    0 0\n')
+            WriteToFile.close()
+
+            command = 'mount -o remount,rw,hidepid=2 /proc'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ###
+
+            CentOSPath = '/etc/redhat-release'
+            openEulerPath = '/etc/openEuler-release'
+
+            if not os.path.exists(CentOSPath) or not os.path.exists(openEulerPath):
+                group = 'nobody'
+            else:
+                group = 'nogroup'
+
+            command = 'chown root:%s /usr/local/lsws/logs' % (group)
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 750 /usr/local/lsws/logs'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            ## symlink protection
+
+            writeToFile = open('/usr/lib/sysctl.d/50-default.conf', 'a')
+            writeToFile.writelines('fs.protected_hardlinks = 1\n')
+            writeToFile.writelines('fs.protected_symlinks = 1\n')
+            writeToFile.close()
+
+            command = 'sysctl --system'
+            ProcessUtilities.executioner(command, 'root', True)
+
+            command = 'chmod 700 %s' % ('/home/cyberpanel')
+            ProcessUtilities.executioner(command, 'root', True)
+
+            destPrivKey = "/usr/local/lscp/conf/key.pem"
+
+            command = 'chmod 600 %s' % (destPrivKey)
+            ProcessUtilities.executioner(command, 'root', True)
+
+
+
+        except BaseException as msg:
+            logging.writeToFile(str(msg) + " [fixPermissions]")
+
+
 
 

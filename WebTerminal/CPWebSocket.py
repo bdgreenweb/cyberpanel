@@ -28,7 +28,7 @@ class SSHServer(multi.Thread):
             sshData = ProcessUtilities.outputExecutioner('cat /etc/ssh/sshd_config').split('\n')
 
             for items in sshData:
-                if items.find('Port') > -1:
+                if items.find('Port') > -1 and items[0] != '#':
                     if items[0] == 0:
                         pass
                     else:
@@ -145,22 +145,22 @@ if __name__ == "__main__":
     writeToFile.write(str(os.getpid()))
     writeToFile.close()
 
-    SSHServer.findSSHPort()
-
-    http_server = tornado.httpserver.HTTPServer(application, ssl_options={
-        "certfile": "/usr/local/lscp/conf/cert.pem",
-        "keyfile": "/usr/local/lscp/conf/key.pem",
-    }, )
-
-    ADDR = '0.0.0.0'
-    http_server.listen(5678, ADDR)
-    print('*** Websocket Server Started at %s***' % ADDR)
-
-    import signal
-    def close_sig_handler(signal, frame):
-        http_server.stop()
-        sys.exit()
-
-    signal.signal(signal.SIGINT, close_sig_handler)
-
-    tornado.ioloop.IOLoop.instance().start()
+    # SSHServer.findSSHPort()
+    #
+    # http_server = tornado.httpserver.HTTPServer(application, ssl_options={
+    #     "certfile": "/usr/local/lscp/conf/cert.pem",
+    #     "keyfile": "/usr/local/lscp/conf/key.pem",
+    # }, )
+    #
+    # ADDR = '0.0.0.0'
+    # http_server.listen(5678, ADDR)
+    # print('*** Websocket Server Started at %s***' % ADDR)
+    #
+    # import signal
+    # def close_sig_handler(signal, frame):
+    #     http_server.stop()
+    #     sys.exit()
+    #
+    # signal.signal(signal.SIGINT, close_sig_handler)
+    #
+    # tornado.ioloop.IOLoop.instance().start()

@@ -13,21 +13,24 @@ check_OS() {
 	  exit
 	fi
 
-	if grep -q -E "CentOS Linux 7|CentOS Linux 8" /etc/os-release ; then
-	  Server_OS="CentOS"
-	elif grep -q "AlmaLinux-8" /etc/os-release ; then
+	if grep -q -E "CentOS Linux 7|CentOS Linux 8|CentOS Stream" /etc/os-release ; then
+          Server_OS="CentOS"
+        elif grep -q "Red Hat Enterprise Linux" /etc/os-release ; then
+          Server_OS="RedHat"
+	elif grep -q -E "AlmaLinux-8|AlmaLinux-9|AlmaLinux-10" /etc/os-release ; then
 	  Server_OS="AlmaLinux"
 	elif grep -q -E "CloudLinux 7|CloudLinux 8" /etc/os-release ; then
 	  Server_OS="CloudLinux"
-	elif grep -q -E "Ubuntu 18.04|Ubuntu 20.04|Ubuntu 20.10" /etc/os-release ; then
+	elif grep -q -E "Ubuntu 18.04|Ubuntu 20.04|Ubuntu 20.10|Ubuntu 22.04" /etc/os-release ; then
 	  Server_OS="Ubuntu"
 	elif grep -q -E "Rocky Linux" /etc/os-release ; then
 	  Server_OS="RockyLinux"
+	elif grep -q -E "openEuler 20.03|openEuler 22.03" /etc/os-release ; then
+	  Server_OS="openEuler"
 	else
 	  echo -e "Unable to detect your system..."
-	  echo -e "\nCyberPanel is supported on Ubuntu 18.04 x86_64, Ubuntu 20.04 x86_64, Ubuntu 20.10 x86_64, CentOS 7.x, CentOS 8.x, AlmaLinux 8.x, RockyLinux 8.x, CloudLinux 7.x, CloudLinux 8.x...\n"
-	  Debug_Log2 "CyberPanel is supported on Ubuntu 18.04 x86_64, Ubuntu 20.04 x86_64, Ubuntu 20.10 x86_64, CentOS 7.x, CentOS 8.x, AlmaLinux 8.x, RockyLinux 8.x, CloudLinux 7.x, CloudLinux 8.x... [404]"
-	  exit
+	  echo -e "\nCyberPanel is supported on x86_64 based Ubuntu 18.04, Ubuntu 20.04, Ubuntu 20.10, Ubuntu 22.04, CentOS 7, CentOS 8, AlmaLinux 8, AlmaLinux 9, AlmaLinux 10, RockyLinux 8, CloudLinux 7, CloudLinux 8, openEuler 20.03, openEuler 22.03...\n"
+  	  exit
 	fi
 
 	Server_OS_Version=$(grep VERSION_ID /etc/os-release | awk -F[=,] '{print $2}' | tr -d \" | head -c2 | tr -d . )
@@ -35,10 +38,10 @@ check_OS() {
 
 	echo -e "System: $Server_OS $Server_OS_Version detected...\n"
 
-	if [[ $Server_OS = "CloudLinux" ]] || [[ "$Server_OS" = "AlmaLinux" ]] || [[ "$Server_OS" = "RockyLinux" ]] ; then
+	if [[ $Server_OS = "CloudLinux" ]] || [[ "$Server_OS" = "AlmaLinux" ]] || [[ "$Server_OS" = "RockyLinux" ]] || [[ "$Server_OS" = "RedHat" ]]; then
 	  Server_OS="CentOS"
-	  #CloudLinux gives version id like 7.8 , 7.9 , so cut it to show first number only
-	  #treat CL , Rocky and Alma as CentOS
+  	  #CloudLinux gives version id like 7.8, 7.9, so cut it to show first number only
+  	  #treat CloudLinux, Rocky and Alma as CentOS
 	fi
 
 }
@@ -212,7 +215,7 @@ phpmyadmin_limits() {
 	read TMP_YN
 	if [[ $TMP_YN == "Y" ]] || [[ $TMP_YN == "y" ]] ; then 
 	
-		if [[ "$SERVER_OS" == "CentOS" ]] ; then 
+		if [[ "$SERVER_OS" == "CentOS" ]] || [[ "$SERVER_OS" == "openEuler" ]] ; then 
 			php_ini_path="/usr/local/lsws/lsphp73/etc/php.ini"
 		fi 
 
@@ -238,6 +241,9 @@ install_php_redis() {
 	if [[ $SERVER_OS == "Ubuntu" ]] ; then
 		DEBIAN_FRONTEND=noninteractive apt install -y lsphp74-redis lsphp73-redis lsphp72-redis lsphp71-redis lsphp70-redis
 	fi
+	if [[ $SERVER_OS == "openEuler" ]] ; then
+		dnf install -y lsphp74-redis lsphp73-redis lsphp72-redis lsphp71-redis
+	fi
 	echo -e "\nRedis extension for PHP has been installed..."
 	exit
 }
@@ -251,6 +257,9 @@ install_redis() {
 	fi
 	if [[ ! -f /usr/bin/redis-cli ]] && [[ $SERVER_OS == "Ubuntu" ]] ; then
 		DEBIAN_FRONTEND=noninteractive apt install -y redis
+	fi
+	if [[ ! -f /usr/bin/redis-cli ]] && [[ $SERVER_OS == "openEuler" ]] ; then
+		yum install -y redis6
 	fi
 	if ifconfig -a | grep inet6 ; then
 		echo -e "\n IPv6 detected..."
@@ -288,7 +297,7 @@ read TMP_YN
 		if [[ -f /usr/local/lsmcd/bin/lsmcd ]] ; then
 			echo -e "\nLiteSpeed Memcached is already installed..."
 		else
-			if [[ $SERVER_OS == "CentOS" ]] ; then
+			if [[ $SERVER_OS == "CentOS" ]] || [[ $SERVER_OS == "openEuler" ]] ; then
 				yum groupinstall "Development Tools" -y
 				yum install autoconf automake zlib-devel openssl-devel expat-devel pcre-devel libmemcached-devel cyrus-sasl* -y
 			elif [[ $SERVER_OS == "Ubuntu" ]] ; then
@@ -329,6 +338,11 @@ read TMP_YN
 		if [[ ! -f /usr/bin/memcached ]] && [[ $SERVER_OS == "Ubuntu" ]] ; then
 		  DEBIAN_FRONTEND=noninteractive apt install memcached -y
 		fi
+		if [[ ! -f /usr/bin/memcached ]] && [[ $SERVER_OS == "openEuler" ]] ; then
+		  yum install memcached -y
+		  sed -i 's|OPTIONS=""|OPTIONS="-l 127.0.0.1 -U 0"|g' /etc/sysconfig/memcached
+		  #this will disbale UDP and bind to 127.0.0.1 to prevent UDP amplification attack
+		fi
 		if systemctl is-active --quiet memcached ; then
 		systemctl status memcached
 		else
@@ -350,6 +364,9 @@ install_php_memcached() {
 	fi
 	if [[ $SERVER_OS == "Ubuntu" ]] ; then
 	DEBIAN_FRONTEND=noninteractive apt install -y lsphp74-memcached lsphp73-memcached lsphp72-memcached lsphp71-memcached lsphp70-memcached
+	fi
+	if [[ $SERVER_OS == "openEuler" ]] ; then
+	dnf install -y lsphp74-memcached lsphp73-memcached lsphp72-memcached lsphp71-memcached
 	fi
 	echo -e "\nMemcached extension for PHP has been installed..."
 	exit
@@ -414,7 +431,7 @@ sudo_check() {
 		echo -e "\nYou must use root user to use CyberPanel Utility..."
 		exit
 	else
-		echo -e "\nYou are runing as root..."
+		echo -e "\nYou are running as root..."
 	fi
 }
 

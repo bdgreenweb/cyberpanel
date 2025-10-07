@@ -2,10 +2,15 @@
 import os
 import os.path
 import sys
+
 import django
 sys.path.append('/usr/local/CyberCP')
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "CyberCP.settings")
-django.setup()
+try:
+    django.setup()
+except:
+    pass
+
 import plogical.CyberCPLogFileWriter as logging
 import argparse
 from plogical.processUtilities import ProcessUtilities
@@ -61,6 +66,18 @@ class FirewallUtilities:
         ProcessUtilities.executioner(command)
 
         return 1
+
+    @staticmethod
+    def addSieveFirewallRule():
+        """Add Sieve port 4190 to firewall for all OS variants"""
+        try:
+            # Add Sieve port 4190 to firewall
+            FirewallUtilities.addRule('tcp', '4190', '0.0.0.0/0')
+            logging.CyberCPLogFileWriter.writeToFile("Sieve port 4190 added to firewall successfully")
+            return 1
+        except BaseException as msg:
+            logging.CyberCPLogFileWriter.writeToFile("Failed to add Sieve port 4190 to firewall: " + str(msg))
+            return 0
 
     @staticmethod
     def deleteRule(proto, port, ipAddress):
